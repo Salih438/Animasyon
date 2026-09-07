@@ -217,9 +217,9 @@ function _createPoleGeometry() {
 
 function _buildLampposts(parentGroup) {
   const matPole = new THREE.MeshStandardMaterial({
-    color:     0x1c1f26,
-    metalness: 0.85,
-    roughness: 0.35,
+    color:     0x343a4a, // Belirgin dökme demir metalik direk tonu
+    metalness: 0.70,
+    roughness: 0.30,
   });
 
   const matBulb = new THREE.MeshStandardMaterial({
@@ -293,11 +293,19 @@ export async function initLighting(scene, group, config) {
 
   // ── 2. AmbientLight ───────────────────────────────────────────────────────
   _ambientLight = new THREE.AmbientLight(
-    0x08081a, // Gece mavisi dolgu
-    0.40
+    0x141828, // Gece mavisi dolgu
+    0.65
   );
   _ambientLight.name = 'ambientLight';
   lightsGroup.add(_ambientLight);
+
+  // ── 2b. Walker Rim & Fill Light (Karakteri arkadan aydınlatan sinematik dolgu) ──
+  const walkerFill = new THREE.DirectionalLight(0xaad0ff, 1.10);
+  walkerFill.name = 'walkerFillLight';
+  walkerFill.position.set(0.5, 4.5, -6.0);
+  walkerFill.target.position.set(0.0, 1.2, 2.0);
+  lightsGroup.add(walkerFill);
+  lightsGroup.add(walkerFill.target);
 
   // ── 3. DirectionalLight (Ay Işığı & Şimşek Flaş Kaynağı) ─────────────────
   _moonLight = new THREE.DirectionalLight(0x1a1a2e, 0.25);

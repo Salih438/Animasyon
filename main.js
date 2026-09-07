@@ -35,12 +35,12 @@ export const CONFIG = Object.freeze({
 
   /** Kamera */
   camera: {
-    fov:      52,       // Sinematik insan bakış açısı
+    fov:      54,       // Sinematik geniş açı
     near:     0.1,
     far:      4000,
-    // Walker (X=0, Y=0, Z=2) tam kameranın önünde ve merkezinde
-    position: { x: 0.0, y: 1.80, z: -3.0 },
-    lookAt:   { x: 0.0, y: 1.35, z: 40.0 },
+    // Walker (X=0, Y=0, Z=2) tam kameranın önünde; başından ayaklarına kadar net görünür
+    position: { x: 0.0, y: 2.05, z: -3.2 },
+    lookAt:   { x: 0.0, y: 1.30, z: 35.0 },
   },
 
   /** Renderer */
