@@ -38,9 +38,9 @@ export const CONFIG = Object.freeze({
     fov:      52,       // Sinematik insan bakış açısı
     near:     0.1,
     far:      4000,
-    // Over-The-Shoulder / Third-Person: Walker (X=3.2, Y=0, Z=0) arkasında ve sol omzunda
-    position: { x: 2.1, y: 2.35, z: -4.8 },
-    lookAt:   { x: 0.8, y: 1.55, z: 60.0 },
+    // Walker (X=0, Y=0, Z=2) tam kameranın önünde ve merkezinde
+    position: { x: 0.0, y: 1.80, z: -3.0 },
+    lookAt:   { x: 0.0, y: 1.35, z: 40.0 },
   },
 
   /** Renderer */

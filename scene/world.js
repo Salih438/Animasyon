@@ -204,8 +204,8 @@ function _buildNeonSigns(parentGroup) {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.name = `neon_${sign.text}_${idx}`;
 
-    // X pozisyonu: Kaldırım sınırının hemen üstünde, cepheden yola doğru bakar
-    const posX = sign.side === 'right' ? 8.65 : -7.35;
+    // X pozisyonu: Bina cephesinin hemen önünde, kaldırım üstünde yola doğru sarkar
+    const posX = sign.side === 'right' ? (SIDEWALK_OUTER_X - 0.6) : (-SIDEWALK_OUTER_X + 0.6);
     mesh.position.set(posX, sign.y, sign.z);
 
     // Yola dik bakan blade sign açıları
@@ -290,7 +290,7 @@ function _buildSide(sideIndex, sideName, mesh) {
     }
 
     // X merkezi (Kaldırım dış kenarından geriye doğru oturur)
-    const baseOffset = isRight ? (SIDEWALK_OUTER_X + w / 2 + 1.2) : (-13.35 - w / 2 - 1.2);
+    const baseOffset = isRight ? (SIDEWALK_OUTER_X + w / 2 + 1.2) : (-SIDEWALK_OUTER_X - w / 2 - 1.2);
     const jitterX = (_seed(gi, 5) - 0.5) * 3.5;
     const x = baseOffset + jitterX;
     const y = h / 2;
