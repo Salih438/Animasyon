@@ -33,14 +33,16 @@ import { initAudio, startAudio } from './scene/audio.js';
 // ─── Central Configuration ──────────────────────────────────────────────────
 export const CONFIG = Object.freeze({
 
-  /** Kamera */
+  /** Kamera — First-Person POV (ADAM BİZİZ) */
   camera: {
     fov:      54,       // Sinematik geniş açı
     near:     0.1,
     far:      4000,
-    // Walker (X=0, Y=0, Z=2) tam kameranın önünde; başından ayaklarına kadar net görünür
-    position: { x: 0.0, y: 2.05, z: -3.2 },
-    lookAt:   { x: 0.0, y: 1.30, z: 35.0 },
+    // İnsan göz hizası (baseY = 1.70m), sağ şeritte (baseX = 2.20m), cadde ufuk çizgisine bakar
+    baseX:    2.20,
+    baseY:    1.70,
+    baseZ:    0.00,
+    lookAt:   { x: 0.50, y: 1.45, z: 120.0 },
   },
 
   /** Renderer */
@@ -135,7 +137,7 @@ function initScene() {
 }
 
 function initCamera() {
-  const { fov, near, far, position, lookAt } = CONFIG.camera;
+  const { fov, near, far, baseX, baseY, baseZ, lookAt } = CONFIG.camera;
 
   camera = new THREE.PerspectiveCamera(
     fov,
@@ -144,10 +146,11 @@ function initCamera() {
     far
   );
 
-  camera.position.set(position.x, position.y, position.z);
+  camera.position.set(baseX, baseY, baseZ);
   camera.lookAt(lookAt.x, lookAt.y, lookAt.z);
 
-  // Kamera sabit kalır — her frame güncellenmez
+  // FPS Viewmodel şemsiyesini desteklemek için kamera sahneye eklenmelidir
+  scene.add(camera);
 }
 
 function initClock() {
