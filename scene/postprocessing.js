@@ -69,6 +69,14 @@ export async function initPostprocessing(renderer, scene, camera, config = {}) {
 
     // 2. RenderPass — Base Scene Pass
     _renderPass = new RenderPass(scene, camera);
+    const origRender = _renderPass.render.bind(_renderPass);
+    _renderPass.render = function (renderer, writeBuffer, readBuffer, deltaTime, maskActive) {
+      origRender(renderer, writeBuffer, readBuffer, deltaTime, maskActive);
+      if (typeof window !== 'undefined') {
+        window.__sceneDrawCalls = renderer.info.render.calls;
+        window.__sceneTriangles = renderer.info.render.triangles;
+      }
+    };
     _composer.addPass(_renderPass);
 
     // 3. UnrealBloomPass — Anti-Nuclear Bloom

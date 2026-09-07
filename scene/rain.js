@@ -277,3 +277,18 @@ export function setRainLightningFactor(factor) {
     _material.opacity = 0.50 + factor * 0.35; // 0.50 -> 0.85
   }
 }
+
+/**
+ * Pencere boyutu değiştiğinde optik damla boyutunu dengeler.
+ * Küçük ekranlarda iğne çizgilerinin devleşmesini, 4K ekranlarda ise kaybolmasını önler.
+ *
+ * @param {number} width  — Yeni viewport genişliği (px)
+ * @param {number} height — Yeni viewport yüksekliği (px)
+ */
+export function onResizeRain(width, height) {
+  if (!_material) return;
+  const scale = Math.max(0.65, Math.min(1.45, height / 1080));
+  _material.size = 0.10 * scale;
+  _material.needsUpdate = true;
+}
+

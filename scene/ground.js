@@ -14,30 +14,40 @@ import * as THREE from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 
 // ── Layout Boyutları (Metre Cinsinden) ───────────────────────────────────────
-export const ROAD_WIDTH      = 11.6;  // Yol genişliği (X: -5.8 .. +5.8)
-export const ROAD_CENTER_X   =  0.0;  // Yol merkezi tam X = 0
+// Kamera baseX = -3.80 m ile sağ kaldırımda yürür; cadde solumuzda (X >= -2.55 m) uzanır
+export const ROAD_MIN_X      = -2.55; // Yolun sağ sınırı (sağ bordür iç kenarı, kameranın hemen solu)
+export const ROAD_MAX_X      =  6.20; // Yolun sol sınırı (karşı sol bordür)
+export const ROAD_WIDTH      = ROAD_MAX_X - ROAD_MIN_X; // 8.75 m genişlik
+export const ROAD_CENTER_X   = (ROAD_MIN_X + ROAD_MAX_X) / 2; // +1.825 m (Sarı orta çizgi)
 export const ROAD_LENGTH     = 3000;  // Z yönünde uzunluk (-50 .. 2950 m)
 
-export const CURB_WIDTH      = 0.40;  // Bordür taşı genişliği
-export const CURB_HEIGHT     = 0.25;  // Yoldan 15 cm yukarı taşan taş bordür
-export const SIDEWALK_THICK  = 0.18;  // Kaldırım kalınlığı
-export const SIDEWALK_WIDTH  = 6.6;   // Kaldırım genişliği
+export const CURB_WIDTH      = 0.35;  // Bordür taşı genişliği
+export const CURB_HEIGHT     = 0.26;  // Asfalttan 26 cm, kaldırımdan 12 cm yukarı taşan taş bordür
+export const SIDEWALK_THICK  = 0.14;  // Kaldırım kalınlığı (Y = 0.14m yüzey)
+export const SIDEWALK_WIDTH  = 3.20;  // Kaldırım genişliği
 
-// Sağ ve Sol Sınırlar (Sokak lambaları ve binalar için)
-export const RIGHT_CURB_X    = 5.80;  // Sağ bordür merkezi
-export const RIGHT_SW_X      = 9.30;  // Sağ kaldırım merkezi
-export const SIDEWALK_OUTER_X= 12.60; // Binaların başladığı sınır
+// Sağ Kaldırım (Yürüdüğümüz taraf: -3.80 m) ve Karşı Sol Kaldırım (+8.05 m)
+export const RIGHT_CURB_X    = -2.72; // Sağ bordür merkezi (Yol ve yürüdüğümüz kaldırım sınırı)
+export const RIGHT_SW_X      = -4.40; // Sağ kaldırım merkezi (-3.80 m güvenle bu kaldırımın ortasındadır)
+export const SIDEWALK_OUTER_X=  6.10; // Binaların ve dükkanların başladığı hat
 
-export const LEFT_CURB_X     = -5.80; // Sol bordür merkezi
-export const LEFT_SW_X       = -9.30; // Sol kaldırım merkezi
+export const LEFT_CURB_X     =  6.37; // Karşı sol bordür merkezi
+export const LEFT_SW_X       =  8.05; // Karşı sol kaldırım merkezi
 
 const Z_CENTER               = 1450;  // Geometri merkezi
+
+export const WALK_SPEED    = 2.8;   // m/s (İnsan yürüyüş hızı — caddenin akışı)
+export const STRIPE_PERIOD  = 7.0;   // m (Sarı kesik şerit periyodu: 3.2m boya + 3.8m boşluk)
 
 // ── Modül Durumu ────────────────────────────────────────────────────────────
 let _group       = null;
 let _sceneRef    = null;
 let _reflector   = null;
 let _puddleTex   = null;
+let _dashMesh    = null;
+let _zebraGroup  = null;
+let _zebraZ      = 14.0;
+let _walkDist    = 0.0;
 
 let _matAsphalt  = null;
 let _matSidewalk = null;
@@ -107,11 +117,11 @@ function _createPuddleTexture() {
 const WetAsphaltReflectorShader = {
   name: 'WetAsphaltReflectorShader',
   uniforms: {
-    color:         { value: new THREE.Color(0x111115) }, // Koyu ıslak zift
+    color:         { value: new THREE.Color(0x090b10) }, // Koyu ıslak zift
     tDiffuse:      { value: null },
     textureMatrix: { value: new THREE.Matrix4() },
     tPuddle:       { value: null },
-    uBlendFactor:  { value: 0.24 },                      // Aşırı beyazlamayı önleyen zarif yansıma
+    uBlendFactor:  { value: 0.28 },                      // Aşırı beyazlamayı önleyen derin yansıma
     fogColor:      { value: new THREE.Color(0x050510) },
     fogDensity:    { value: 0.00045 },
   },
@@ -177,6 +187,27 @@ export async function initGround(scene, group, config) {
 }
 
 export function updateGround(delta) {
+  _walkDist += delta * WALK_SPEED;
+
+  // 1. Sarı Kesik Şeritlerin Sonsuz Akışı (Zero Allocation Infinite Seamless Scroll)
+  if (_dashMesh) {
+    _dashMesh.position.z = -(_walkDist % STRIPE_PERIOD);
+  }
+
+  // 2. Islak Asfalt Su Birikintisi & Tekerlek İzi Yansıma Dokusunun Akışı
+  if (_puddleTex) {
+    _puddleTex.offset.y = -(_walkDist / 75.0);
+  }
+
+  // 3. Yaya Geçidinin Yaklaşması ve Periyodik Döngüsü
+  if (_zebraGroup) {
+    _zebraZ -= delta * WALK_SPEED;
+    if (_zebraZ < -15.0) {
+      _zebraZ = 160.0;
+    }
+    _zebraGroup.position.z = _zebraZ;
+  }
+
   if (!_reflector || !_sceneRef) return;
 
   if (_sceneRef.fog && _reflector.material && _reflector.material.uniforms) {
@@ -205,43 +236,43 @@ export function onResizeGround(width, height) {
 function _initMaterials() {
   _puddleTex = _createPuddleTexture();
 
-  // Koyu ıslak zift asfaltı
+  // Koyu ıslak zift asfaltı — derin siyah kontrast
   _matAsphalt = new THREE.MeshStandardMaterial({
-    color:     0x111115,
-    roughness: 0.22,
-    metalness: 0.20,
+    color:     0x090b10,
+    roughness: 0.18,
+    metalness: 0.28,
   });
 
-  // Kaldırımlar: Belirgin koyu mat taş
+  // Kaldırımlar: Belirgin ıslak taş döşeme
   _matSidewalk = new THREE.MeshStandardMaterial({
-    color:     0x1e2028,
-    roughness: 0.72,
-    metalness: 0.05,
+    color:     0x1c1f28,
+    roughness: 0.60,
+    metalness: 0.08,
   });
 
-  // Bordürler: Yükseltilmiş granit taş
+  // Bordürler: Yükseltilmiş ıslak granit taş — asfalttan belirgin yüksek kontrast
   _matCurb = new THREE.MeshStandardMaterial({
-    color:     0x2f323d,
-    roughness: 0.55,
-    metalness: 0.10,
+    color:     0x3a3f50,
+    roughness: 0.30,
+    metalness: 0.25,
   });
 
-  // Parlak sarı kesik orta şerit
+  // Parlak sarı kesik orta şerit — suyun altından jilet gibi parıldasın
   _matYellowLine = new THREE.MeshStandardMaterial({
     color:             0xffcc00,
     emissive:          new THREE.Color(0xff9900),
-    emissiveIntensity: 1.40,     // Gece caddesinde jilet gibi parlayan sarı çizgiler
-    roughness:         0.28,
-    metalness:         0.05,
+    emissiveIntensity: 1.80,     // Gece caddesinde parıldayan sarı çizgiler
+    roughness:         0.20,
+    metalness:         0.08,
   });
 
   // Beyaz kenar şeritleri
   _matWhiteLine = new THREE.MeshStandardMaterial({
     color:             0xffffff,
-    emissive:          new THREE.Color(0x999999),
-    emissiveIntensity: 0.75,
-    roughness:         0.30,
-    metalness:         0.05,
+    emissive:          new THREE.Color(0xaaaaaa),
+    emissiveIntensity: 1.10,
+    roughness:         0.22,
+    metalness:         0.08,
   });
 }
 
@@ -291,52 +322,58 @@ function _buildRoadMarkings() {
   const stripeHeight = 0.025; // Belirgin 3D boya kabartması
   const stripeCount  = Math.floor(ROAD_LENGTH / stripePeriod);
 
-  // Walker X=0'da yürüdüğü için sarı kesik şerit tam solunda (X = -0.65 m) yer alır
+  // Yolun tam ortasında (ROAD_CENTER_X = -1.825 m) kesik sarı çizgiler
   const dashGeo = new THREE.BoxGeometry(stripeWidth, stripeHeight, stripeLength);
-  const dashMesh = new THREE.InstancedMesh(dashGeo, _matYellowLine, stripeCount);
-  dashMesh.name = 'road_center_dashes';
-  dashMesh.receiveShadow = true;
+  _dashMesh = new THREE.InstancedMesh(dashGeo, _matYellowLine, stripeCount);
+  _dashMesh.name = 'road_center_dashes';
+  _dashMesh.receiveShadow = true;
 
   const m4 = new THREE.Matrix4();
   for (let i = 0; i < stripeCount; i++) {
     const z = -50 + i * stripePeriod + stripeLength / 2;
-    m4.setPosition(-0.65, stripeHeight / 2 + 0.005, z);
-    dashMesh.setMatrixAt(i, m4);
+    m4.setPosition(ROAD_CENTER_X, stripeHeight / 2 + 0.005, z);
+    _dashMesh.setMatrixAt(i, m4);
   }
-  dashMesh.instanceMatrix.needsUpdate = true;
-  _group.add(dashMesh);
+  _dashMesh.instanceMatrix.needsUpdate = true;
+  _group.add(_dashMesh);
 
   // 2. Beyaz Kenar Şeritleri (Solid Shoulder Lines)
   const shoulderGeo = new THREE.BoxGeometry(0.18, 0.025, ROAD_LENGTH);
 
-  // Sol kenar şeridi (X = -5.40 m)
-  const lineLeft = new THREE.Mesh(shoulderGeo, _matWhiteLine);
-  lineLeft.name = 'road_shoulder_left';
-  lineLeft.position.set(-5.40, 0.015, Z_CENTER);
-  _group.add(lineLeft);
-
-  // Sağ kenar şeridi (X = +5.40 m)
+  // Sağ kenar şeridi (sağ bordür dibi, kameranın hemen solunda)
   const lineRight = new THREE.Mesh(shoulderGeo, _matWhiteLine);
   lineRight.name = 'road_shoulder_right';
-  lineRight.position.set(5.40, 0.015, Z_CENTER);
+  lineRight.position.set(ROAD_MIN_X + 0.18, 0.015, Z_CENTER);
   _group.add(lineRight);
 
-  // 3. Yaya Geçidi (Zebra Crossing) — Walker'ın hemen önünde (Z = 12.0 m)
-  const crossZ = 12.0;
-  const zebraBarCount = 10;
-  const zebraWidth = 0.60;
+  // Karşı sol kenar şeridi (karşı sol bordür dibi)
+  const lineLeft = new THREE.Mesh(shoulderGeo, _matWhiteLine);
+  lineLeft.name = 'road_shoulder_left';
+  lineLeft.position.set(ROAD_MAX_X - 0.18, 0.015, Z_CENTER);
+  _group.add(lineLeft);
+
+  // 3. Yaya Geçidi (Zebra Crossing) — Başlangıçta hemen önümüzde (Z = 14.0 m)
+  const crossZ = 14.0;
+  const zebraBarCount = 8;
+  const zebraWidth = 0.55;
   const zebraLength = 3.6;
-  const zebraSpacing = 1.05;
+  const zebraSpacing = (ROAD_WIDTH - 0.8) / (zebraBarCount - 1);
+
+  _zebraGroup = new THREE.Group();
+  _zebraGroup.name = 'zebra_crossing_group';
+  _zebraZ = crossZ;
+  _zebraGroup.position.set(0, 0, crossZ);
 
   const zebraGeo = new THREE.BoxGeometry(zebraWidth, 0.025, zebraLength);
 
   for (let b = 0; b < zebraBarCount; b++) {
     const bar = new THREE.Mesh(zebraGeo, _matWhiteLine);
     bar.name = `zebra_bar_${b}`;
-    const x = -4.75 + b * zebraSpacing;
-    bar.position.set(x, 0.016, crossZ);
-    _group.add(bar);
+    const x = (ROAD_MIN_X + 0.40) + b * zebraSpacing;
+    bar.position.set(x, 0.016, 0);
+    _zebraGroup.add(bar);
   }
+  _group.add(_zebraGroup);
 }
 
 function _buildSidewalks() {

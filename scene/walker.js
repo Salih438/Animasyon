@@ -25,33 +25,33 @@ import * as THREE from 'three';
 // ══════════════════════════════════════════════════════════════════════════════
 
 // Şemsiye kök grubunun kamera yerel koordinatlarındaki baz konumu ve rotasyonu
-// Ekranın üst-sağ kısmını zarifçe saracak ve yolun önünü (orta ve alt %70) tamamen açık bırakacak şekilde kalibre edilmiştir.
+// Ekranın üst kısmını zarifçe taçlandıracak ve yolun önünü (orta ve alt %80) tamamen açık bırakacak şekilde kalibre edilmiştir.
 const BASE_POS = Object.freeze({
-  x:  0.22,
-  y:  0.20,
-  z: -0.62,
+  x:  0.12,
+  y:  0.44,
+  z: -0.50,
 });
 
 const BASE_ROT = Object.freeze({
-  x:  0.18,
-  y: -0.28,
-  z:  0.10,
+  x: -0.06,
+  y: -0.12,
+  z: -0.08,
 });
 
 // Yürüyüş frekansı ve salınım genlikleri
 const STRIDE_FREQ   = 3.8;   // rad/s (main.js ile senkronize adım frekansı)
-const SWAY_POS_X    = 0.014; // Yatay salınım genliği (m)
-const SWAY_POS_Y    = 0.020; // Dikey salınım genliği (m)
-const SWAY_ROT_Z    = 0.022; // Z ekseni yatma genliği (rad)
-const SWAY_ROT_X    = 0.016; // X ekseni öne-arkaya yaylanma (rad)
+const SWAY_POS_X    = 0.010; // Yatay salınım genliği (m)
+const SWAY_POS_Y    = 0.014; // Dikey salınım genliği (m)
+const SWAY_ROT_Z    = 0.015; // Z ekseni yatma genliği (rad)
+const SWAY_ROT_X    = 0.012; // X ekseni öne-arkaya yaylanma (rad)
 const LAG_PHASE     = 0.28;  // Kol ağırlığı hissi için adım gecikmesi (rad)
 
 // Şemsiye geometrik boyutları
-const CANOPY_RADIUS = 0.85;  // Kubbe yarıçapı
-const CANOPY_HEIGHT = 0.26;  // Kubbe derinliği
+const CANOPY_RADIUS = 0.72;  // Kubbe yarıçapı
+const CANOPY_HEIGHT = 0.22;  // Kubbe derinliği
 const CANOPY_SEGS   = 16;    // Kubbe dilim sayısı (teller için 16 segment)
 const SHAFT_RADIUS  = 0.007; // Baston gövde yarıçapı
-const SHAFT_LENGTH  = 0.98;  // Baston uzunluğu
+const SHAFT_LENGTH  = 0.95;  // Baston uzunluğu
 const HANDLE_RADIUS = 0.038; // J-kulp kıvrım yarıçapı
 const HANDLE_TUBE   = 0.011; // J-kulp boru kalınlığı
 
@@ -142,16 +142,14 @@ function _buildFpsUmbrella(mat) {
     true
   );
 
-  // Koni tepe noktası yerel Y=+CANOPY_HEIGHT/2; taban rim Y=-CANOPY_HEIGHT/2
   _canopyMesh = new THREE.Mesh(canopyGeo, mat.canopy);
   _canopyMesh.name = 'umbrellaCanopy';
   _canopyMesh.castShadow = true;
 
   // Kubbenin başımızın üstüne yerleşimi (kök gruba göre)
-  // Tepe ucu biraz ileride ve yukarıda; etekler aşağı doğru açılır
-  _canopyMesh.position.set(-0.04, 0.24, -0.15);
-  _canopyMesh.rotation.x = -0.12;
-  _canopyMesh.rotation.z =  0.08;
+  _canopyMesh.position.set(0.0, 0.18, 0.0);
+  _canopyMesh.rotation.x = -0.06;
+  _canopyMesh.rotation.z =  0.04;
   root.add(_canopyMesh);
 
   // ── 2. Kubbe Tepe Ferrule Ucu (Top Apex Tip) ─────────────────────────────
@@ -166,7 +164,6 @@ function _buildFpsUmbrella(mat) {
   tipMesh.add(finialMesh);
 
   // ── 3. Şemsiye Telleri (Canopy Ribs / Spoke Framework) ───────────────────
-  // 16 dilimin her birinin iç yüzeyine oturan ince metalik teller
   const ribGeo = new THREE.CylinderGeometry(0.0025, 0.0025, 1.0, 6);
   const ribMat = mat.ribs;
 
@@ -178,26 +175,19 @@ function _buildFpsUmbrella(mat) {
     const rimX  = Math.cos(angle) * CANOPY_RADIUS;
     const rimZ  = Math.sin(angle) * CANOPY_RADIUS;
 
-    // Apex'ten rim noktasına vektör
     const start = new THREE.Vector3(0, apexY, 0);
     const end   = new THREE.Vector3(rimX, rimY, rimZ);
     const length = start.distanceTo(end);
 
     const ribMesh = new THREE.Mesh(ribGeo, ribMat);
     ribMesh.scale.set(1, length, 1);
-
-    // Konum: iki ucun ortası
     ribMesh.position.copy(start).add(end).multiplyScalar(0.5);
-
-    // Yönlendirme: start'tan end'e baksın
     ribMesh.quaternion.setFromUnitVectors(
       new THREE.Vector3(0, 1, 0),
       end.clone().sub(start).normalize()
     );
-
     _canopyMesh.add(ribMesh);
 
-    // Tel ucundaki küçük parlak koruma damlası
     const capGeo = new THREE.SphereGeometry(0.006, 8, 6);
     const capMesh = new THREE.Mesh(capGeo, mat.brass);
     capMesh.position.set(rimX, rimY, rimZ);
@@ -205,28 +195,29 @@ function _buildFpsUmbrella(mat) {
   }
 
   // ── 4. Baston Gövdesi (Central Shaft) ────────────────────────────────────
-  // Kubbe tepesinden sağ elimize uzanan ana metalik boru
-  const shaftGeo = new THREE.CylinderGeometry(SHAFT_RADIUS, SHAFT_RADIUS, SHAFT_LENGTH, 12);
+  // Kubbe tepesinden sağ alttaki elimize uzanan ana metalik boru
+  const shaftStart = new THREE.Vector3(0.0, 0.16, 0.0);
+  const shaftEnd   = new THREE.Vector3(0.22, -0.72, 0.16);
+  const shaftLen   = shaftStart.distanceTo(shaftEnd);
+  const shaftDir   = shaftEnd.clone().sub(shaftStart).normalize();
+
+  const shaftGeo = new THREE.CylinderGeometry(SHAFT_RADIUS, SHAFT_RADIUS, shaftLen, 12);
   const shaftMesh = new THREE.Mesh(shaftGeo, mat.shaft);
   shaftMesh.name = 'umbrellaShaft';
-
-  // Apex noktasından aşağı sağa doğru eğimli uzanır
-  shaftMesh.position.set(0.05, -0.16, 0.08);
-  shaftMesh.rotation.x = -0.22;
-  shaftMesh.rotation.z = -0.26;
+  shaftMesh.position.copy(shaftStart).add(shaftEnd).multiplyScalar(0.5);
+  shaftMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), shaftDir);
   root.add(shaftMesh);
 
   // ── 5. Alt Runner Halka ve Gergi Kolları (Stretcher Ring) ────────────────
   const runnerGeo = new THREE.CylinderGeometry(SHAFT_RADIUS * 1.5, SHAFT_RADIUS * 1.5, 0.035, 12);
   const runnerMesh = new THREE.Mesh(runnerGeo, mat.brass);
-  runnerMesh.position.set(0, 0.16, 0);
+  runnerMesh.position.set(0, shaftLen * 0.25, 0);
   shaftMesh.add(runnerMesh);
 
   // ── 6. Baston Kulpu (Curved J-Handle) ─────────────────────────────────────
-  // Sağ alt köşede kullanıcının tutuşunu hissettiren klasik kıvrık baston kulpu
   const handleGroup = new THREE.Group();
   handleGroup.name = 'umbrellaHandle';
-  handleGroup.position.set(0, -SHAFT_LENGTH / 2, 0);
+  handleGroup.position.set(0, -shaftLen / 2, 0);
   shaftMesh.add(handleGroup);
 
   // Pirinç geçiş boğazı
@@ -317,7 +308,7 @@ export async function initWalker(scene, group, config, camera) {
  *
  * @param {number} delta — Frame delta süresi (saniye)
  */
-export function updateWalker(delta) {
+export function updateWalker(delta, camera, headYaw = 0.0) {
   if (!_fpsGroup) return;
 
   _walkTime += delta * STRIDE_FREQ;
@@ -327,12 +318,13 @@ export function updateWalker(delta) {
   const sLag     = Math.sin(lagTime);
   const sLag2    = Math.sin(lagTime * 2);
 
-  // 1. Damped Viewmodel Sway
-  _fpsGroup.position.x = BASE_POS.x + sLag  * SWAY_POS_X;
+  // 1. Damped Viewmodel Sway (Adım yaylanması + Kafa dönüşünde kol ataleti)
+  _fpsGroup.position.x = BASE_POS.x + sLag  * SWAY_POS_X - headYaw * 0.035;
   _fpsGroup.position.y = BASE_POS.y + sLag2 * SWAY_POS_Y;
 
   _fpsGroup.rotation.z = BASE_ROT.z + sLag  * SWAY_ROT_Z;
   _fpsGroup.rotation.x = BASE_ROT.x + sLag2 * SWAY_ROT_X;
+  _fpsGroup.rotation.y = BASE_ROT.y - headYaw * 0.22;
 
   // 2. Yağmur Çarpışma Collider Koordinatını Güncelle (Zero Alloc)
   if (_canopyMesh) {

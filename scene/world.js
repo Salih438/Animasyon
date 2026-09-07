@@ -19,7 +19,7 @@
  */
 
 import * as THREE from 'three';
-import { SIDEWALK_OUTER_X } from './ground.js';
+import { SIDEWALK_OUTER_X, WALK_SPEED } from './ground.js';
 
 // ── Sabitler ─────────────────────────────────────────────────────────────────
 const BUILDING_COUNT     = 48;
@@ -35,9 +35,15 @@ const H_MIN = 26,  H_MAX = 80;  // yükseklik (Y)
 const D_MIN = 18,  D_MAX = 34;  // derinlik (Z)
 
 // ── Modül Durumu ─────────────────────────────────────────────────────────────
-let _meshLeft    = null;
-let _meshRight   = null;
-let _signsGroup  = null;
+let _meshLeft         = null;
+let _meshRight        = null;
+let _signsGroup       = null;
+let _alleysGroup      = null;
+let _pedestriansGroup = null;
+
+const _pedestrianObjects = [];
+const _alleyObjects      = [];
+let _worldAnimTime       = 0;
 
 // Reusable math objects
 const _m4    = new THREE.Matrix4();
@@ -205,7 +211,7 @@ function _buildNeonSigns(parentGroup) {
     mesh.name = `neon_${sign.text}_${idx}`;
 
     // X pozisyonu: Bina cephesinin hemen önünde, kaldırım üstünde yola doğru sarkar
-    const posX = sign.side === 'right' ? (SIDEWALK_OUTER_X - 0.6) : (-SIDEWALK_OUTER_X + 0.6);
+    const posX = sign.side === 'right' ? (-SIDEWALK_OUTER_X + 0.2) : (SIDEWALK_OUTER_X - 0.2);
     mesh.position.set(posX, sign.y, sign.z);
 
     // Yola dik bakan blade sign açıları
@@ -217,6 +223,280 @@ function _buildNeonSigns(parentGroup) {
   });
 
   parentGroup.add(_signsGroup);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ARA SOKAKLAR (Alleys) & GİZEMLİ NOIR YAYALAR (Pedestrians)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function _buildAlleys(parentGroup) {
+  _alleysGroup = new THREE.Group();
+  _alleysGroup.name = 'city_alleys';
+
+  const alleyZPositions = [34.0, 104.0, 180.0];
+
+  const matPavement = new THREE.MeshStandardMaterial({
+    color:     0x14161f,
+    roughness: 0.55,
+    metalness: 0.12,
+  });
+
+  const matLamp = new THREE.MeshStandardMaterial({
+    color:             0xffaa44,
+    emissive:          new THREE.Color(0xff8822),
+    emissiveIntensity: 3.5,
+    roughness:         0.20,
+    metalness:         0.70,
+  });
+
+  const matWall = new THREE.MeshStandardMaterial({
+    color:     0x0f1118,
+    roughness: 0.85,
+    metalness: 0.10,
+  });
+
+  alleyZPositions.forEach((zPos, idx) => {
+    const alleyRoot = new THREE.Group();
+    alleyRoot.name = `alley_${idx}`;
+    alleyRoot.position.set(0, 0, zPos);
+
+    // 1. Ara Sokak Zemin Taşları (Sağ kaldırımın dışından sağa doğru derinlemesine uzanır)
+    const floorGeo = new THREE.PlaneGeometry(16.0, 14.0);
+    const floorMesh = new THREE.Mesh(floorGeo, matPavement);
+    floorMesh.rotation.x = -Math.PI / 2;
+    floorMesh.position.set(-SIDEWALK_OUTER_X - 8.0, 0.138, 0);
+    floorMesh.receiveShadow = true;
+    alleyRoot.add(floorMesh);
+
+    // 2. Ara Sokak Yan Duvarları (Sokağın derin koridor hissi)
+    const wallGeo = new THREE.BoxGeometry(16.0, 12.0, 1.0);
+    const wallNear = new THREE.Mesh(wallGeo, matWall);
+    wallNear.position.set(-SIDEWALK_OUTER_X - 8.0, 6.0, -7.0);
+    const wallFar = new THREE.Mesh(wallGeo, matWall);
+    wallFar.position.set(-SIDEWALK_OUTER_X - 8.0, 6.0, 7.0);
+    alleyRoot.add(wallNear, wallFar);
+
+    // 3. Ara Sokak Köşe Feneri (Sıcak amber ışık saçar)
+    const lampGeo = new THREE.BoxGeometry(0.26, 0.40, 0.26);
+    const lampMesh = new THREE.Mesh(lampGeo, matLamp);
+    lampMesh.position.set(-SIDEWALK_OUTER_X - 0.15, 3.4, -6.4);
+    alleyRoot.add(lampMesh);
+
+    // Yerel nokta ışığı (sokağın ağzını aydınlatır)
+    const pLight = new THREE.PointLight(0xff8822, 1.4, 18.0, 2.0);
+    pLight.position.set(-SIDEWALK_OUTER_X - 0.5, 3.4, -6.4);
+    alleyRoot.add(pLight);
+
+    _alleysGroup.add(alleyRoot);
+    _alleyObjects.push({ group: alleyRoot, z: zPos });
+  });
+
+  parentGroup.add(_alleysGroup);
+}
+
+function _mergeGeos(geos) {
+  let totalVerts = 0;
+  const nonIndexed = geos.map(g => {
+    const ni = g.index ? g.toNonIndexed() : g;
+    totalVerts += ni.attributes.position.count;
+    return ni;
+  });
+
+  const posArray  = new Float32Array(totalVerts * 3);
+  const normArray = new Float32Array(totalVerts * 3);
+
+  let offset = 0;
+  for (const g of nonIndexed) {
+    const p = g.attributes.position.array;
+    const n = g.attributes.normal.array;
+    posArray.set(p, offset * 3);
+    if (n) normArray.set(n, offset * 3);
+    offset += g.attributes.position.count;
+  }
+
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+  merged.setAttribute('normal',   new THREE.BufferAttribute(normArray, 3));
+  return merged;
+}
+
+function _createNoirPedestrian(cfg) {
+  const group = new THREE.Group();
+  group.name = `pedestrian_${cfg.id}`;
+
+  const coatColor = cfg.coatColor || 0x0d0f17;
+  const umbColor  = cfg.umbColor  || 0x10141e;
+  const scaleX    = cfg.scaleX    || 1.0;
+  const scaleY    = cfg.scaleY    || 1.0;
+  const hasUmb    = cfg.hasUmbrella !== false;
+  const hasHood   = cfg.hasHood === true;
+
+  const matCoat = new THREE.MeshStandardMaterial({
+    color:     coatColor,
+    roughness: 0.70,
+    metalness: 0.05,
+  });
+
+  const matHat = new THREE.MeshStandardMaterial({
+    color:     0x0a0c12,
+    roughness: 0.60,
+    metalness: 0.10,
+  });
+
+  const matUmb = new THREE.MeshStandardMaterial({
+    color:     umbColor,
+    roughness: 0.40,
+    metalness: 0.15,
+    side:      THREE.DoubleSide,
+  });
+
+  // 1. Gövde ve Bacaklar (Tek Merged BufferGeometry — Draw Call Tasarrufu)
+  const legLGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.45 * scaleY, 8);
+  legLGeo.translate(-0.10 * scaleX, 0.22 * scaleY, 0.0);
+
+  const legRGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.45 * scaleY, 8);
+  legRGeo.translate(0.10 * scaleX, 0.22 * scaleY, 0.0);
+
+  const coatGeo = new THREE.CylinderGeometry(0.18 * scaleX, 0.30 * scaleX, 0.95 * scaleY, 10);
+  coatGeo.translate(0, 0.85 * scaleY, 0);
+
+  const bodyParts = [legLGeo, legRGeo, coatGeo];
+
+  // Eğer kapüşonluysa, yakası kalkık mont boyunluğu
+  if (hasHood) {
+    const collarGeo = new THREE.CylinderGeometry(0.16 * scaleX, 0.22 * scaleX, 0.24 * scaleY, 10, 1, true);
+    collarGeo.translate(0, 1.34 * scaleY, 0);
+    bodyParts.push(collarGeo);
+  }
+
+  const mergedBodyGeo = _mergeGeos(bodyParts);
+  const bodyMesh = new THREE.Mesh(mergedBodyGeo, matCoat);
+  bodyMesh.castShadow    = true;
+  bodyMesh.receiveShadow = true;
+  group.add(bodyMesh);
+
+  // 2. Baş (Etrafa bakınma salınımı için bağımsız pivot)
+  const headGeo = new THREE.SphereGeometry(0.11 * scaleX, 10, 8);
+  const headMesh = new THREE.Mesh(headGeo, matCoat);
+  headMesh.position.set(0, 1.42 * scaleY, 0);
+  group.add(headMesh);
+
+  // Baş Aksesuarı (Şapka veya Kapüşon)
+  if (!hasHood) {
+    // Klasik Film Noir Fötr Şapka
+    const brimGeo = new THREE.CylinderGeometry(0.24 * scaleX, 0.24 * scaleX, 0.02, 12);
+    brimGeo.translate(0, 0.06 * scaleY, 0);
+    const crownGeo = new THREE.CylinderGeometry(0.11 * scaleX, 0.13 * scaleX, 0.12 * scaleY, 10);
+    crownGeo.translate(0, 0.12 * scaleY, 0);
+    const hatGeo = _mergeGeos([brimGeo, crownGeo]);
+    const hatMesh = new THREE.Mesh(hatGeo, matHat);
+    hatMesh.rotation.x = -0.10;
+    headMesh.add(hatMesh);
+  } else {
+    // Yağmurdan koruyan kumaş kapüşon (başın arkasını ve üstünü örten yarım kubbe)
+    const hoodGeo = new THREE.SphereGeometry(0.14 * scaleX, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.70);
+    const hoodMesh = new THREE.Mesh(hoodGeo, matCoat);
+    hoodMesh.rotation.x = -0.15;
+    hoodMesh.position.set(0, 0.03 * scaleY, -0.02);
+    headMesh.add(hoodMesh);
+  }
+
+  // 3. Şemsiye (Varsa)
+  if (hasUmb) {
+    const canopyGeo = new THREE.ConeGeometry(0.55 * scaleX, 0.20 * scaleY, 12, 1, true);
+    canopyGeo.translate(0, 0.24 * scaleY, 0);
+    canopyGeo.rotateX(-0.10);
+
+    const shaftGeo = new THREE.CylinderGeometry(0.007, 0.007, 0.72 * scaleY, 8);
+    shaftGeo.translate(0, 0.0, 0);
+
+    const umbGeo = _mergeGeos([canopyGeo, shaftGeo]);
+    const umbMesh = new THREE.Mesh(umbGeo, matUmb);
+    umbMesh.position.set(0.12 * scaleX, 1.45 * scaleY, 0.04);
+    umbMesh.castShadow = true;
+    group.add(umbMesh);
+  }
+
+  group.userData.headRef = headMesh;
+  return group;
+}
+
+function _buildPedestrians(parentGroup) {
+  _pedestriansGroup = new THREE.Group();
+  _pedestriansGroup.name = 'city_pedestrians';
+
+  const configs = [
+    // 1. Karşı sol kaldırımda bize doğru yürüyen uzun boylu figür (Incoming - Uzun, Lacivert & Hardal)
+    {
+      id: 1, x: 7.8, z: 42.0, yaw: 0.0, speed: -1.3, isWalking: true, phase: 0.0,
+      scaleX: 1.02, scaleY: 1.08,
+      coatColor: 0x0e172a, // Gece mavisi
+      umbColor:  0x8a6218, // Hardal amber
+      hasUmbrella: true, hasHood: false, headOffset: 0.0
+    },
+    // 2. Karşı sol kaldırımda uzaklaşan minyon figür (Outgoing - Minyon, Antrasit & Petrol)
+    {
+      id: 2, x: 8.3, z: 86.0, yaw: Math.PI, speed: 1.1, isWalking: true, phase: 1.85,
+      scaleX: 0.92, scaleY: 0.90,
+      coatColor: 0x1a1c22, // Koyu antrasit
+      umbColor:  0x143428, // Koyu petrol yeşili
+      hasUmbrella: true, hasHood: false, headOffset: 1.2
+    },
+    // 3. Sağ ara sokak ağzında fenerin altında sığınan ŞEMSİYESİZ KAPÜŞONLU silüet (1st Alley)
+    {
+      id: 3, x: -5.30, z: 28.0, yaw: 1.5, speed: 0.0, isWalking: false, phase: 0.72,
+      scaleX: 1.04, scaleY: 1.00,
+      coatColor: 0x2d1218, // Koyu bordo kaban
+      umbColor:  0x000000,
+      hasUmbrella: false, hasHood: true, headOffset: 0.6 // Şemsiyesiz, kapüşonlu!
+    },
+    // 4. İkinci sağ ara sokak ağzında bekleyen gizemli yaya (2nd Alley - Standart boy, Kiremit)
+    {
+      id: 4, x: -5.80, z: 104.0, yaw: 1.4, speed: 0.0, isWalking: false, phase: 2.40,
+      scaleX: 0.98, scaleY: 0.98,
+      coatColor: 0x16181f, // Titanyum füme
+      umbColor:  0x4d181e, // Kiremit bordo
+      hasUmbrella: true, hasHood: false, headOffset: 2.1
+    },
+    // 5. Karşı sol kaldırımda ileride hızlı adımlarla yürüyen uzun silüet (Hızlı yürüyüş)
+    {
+      id: 5, x: 8.0, z: 140.0, yaw: 0.0, speed: -1.5, isWalking: true, phase: 3.95,
+      scaleX: 0.95, scaleY: 1.12, // İnce uzun
+      coatColor: 0x11141c, // Derin gece
+      umbColor:  0x181a22, // Koyu çelik
+      hasUmbrella: true, hasHood: false, headOffset: 3.4
+    },
+    // 6. Sağ kaldırımda önümüzde yürüyen yaya (Kaldırım arkadaşı - Önümüzde Z=18m, Haki & Krem)
+    {
+      id: 6, x: -4.10, z: 18.0, yaw: 0.0, speed: -0.6, isWalking: true, phase: 5.10,
+      scaleX: 1.00, scaleY: 0.96,
+      coatColor: 0x1b2417, // Haki zeytin
+      umbColor:  0x5c523e, // Bej krem
+      hasUmbrella: true, hasHood: false, headOffset: 4.5
+    },
+  ];
+
+  for (const cfg of configs) {
+    const pMesh = _createNoirPedestrian(cfg);
+    pMesh.position.set(cfg.x, 0.14, cfg.z);
+    pMesh.rotation.y = cfg.yaw;
+    _pedestriansGroup.add(pMesh);
+
+    _pedestrianObjects.push({
+      id:         cfg.id,
+      group:      pMesh,
+      x:          cfg.x,
+      z:          cfg.z,
+      baseZ:      cfg.z,
+      speed:      cfg.speed,
+      isWalking:  cfg.isWalking,
+      phase:      cfg.phase,
+      headRef:    pMesh.userData.headRef,
+      headOffset: cfg.headOffset,
+    });
+  }
+
+  parentGroup.add(_pedestriansGroup);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -265,6 +545,12 @@ export async function initWorld(scene, group, config) {
 
   // Canlı neon tabelaları ekle
   _buildNeonSigns(targetGroup);
+
+  // Ara sokakları (Alleys) ekle
+  _buildAlleys(targetGroup);
+
+  // Gizemli noir yayaları (Pedestrians) ekle
+  _buildPedestrians(targetGroup);
 }
 
 function _buildSide(sideIndex, sideName, mesh) {
@@ -289,10 +575,10 @@ function _buildSide(sideIndex, sideName, mesh) {
       if (z >= 96 && z <= 120) z += 28; // Sol ara sokak boşluğu
     }
 
-    // X merkezi (Kaldırım dış kenarından geriye doğru oturur)
-    const baseOffset = isRight ? (SIDEWALK_OUTER_X + w / 2 + 1.2) : (-SIDEWALK_OUTER_X - w / 2 - 1.2);
-    const jitterX = (_seed(gi, 5) - 0.5) * 3.5;
-    const x = baseOffset + jitterX;
+    // X merkezi (Kaldırım dış kenarından geriye doğru oturur, kaldırımı asla kapatmaz)
+    const baseOffset = isRight ? (-SIDEWALK_OUTER_X - w / 2 - 1.2) : (SIDEWALK_OUTER_X + w / 2 + 1.2);
+    const jitterX = (_seed(gi, 5) - 0.5) * 2.0;
+    const x = isRight ? (baseOffset - Math.abs(jitterX)) : (baseOffset + Math.abs(jitterX));
     const y = h / 2;
 
     _pos.set(x, y, z);
@@ -316,7 +602,70 @@ function _buildSide(sideIndex, sideName, mesh) {
 }
 
 export function updateWorld(delta) {
-  // Binalar statiktir; sıfır bellek tahsisi
+  const driftZ = 2.8 * delta;
+
+  // 1. Neon Tabelaların Z Akışı ve Sonsuz Döngüsü
+  if (_signsGroup && _signsGroup.children) {
+    for (let i = 0; i < _signsGroup.children.length; i++) {
+      const sign = _signsGroup.children[i];
+      sign.position.z -= driftZ;
+      if (sign.position.z < -20.0) {
+        sign.position.z += 240.0;
+      }
+    }
+  }
+
+  // 2. Binaların Z Akışı (Caddenin geriye doğru akış hissi)
+  if (_meshLeft) {
+    _meshLeft.position.z -= driftZ;
+    if (_meshLeft.position.z < -1000.0) {
+      _meshLeft.position.z = 0.0;
+    }
+  }
+  if (_meshRight) {
+    _meshRight.position.z -= driftZ;
+    if (_meshRight.position.z < -1000.0) {
+      _meshRight.position.z = 0.0;
+    }
+  }
+
+  // 3. Ara Sokakların Z Akışı (Alleys drift & wrap)
+  for (let i = 0; i < _alleyObjects.length; i++) {
+    const alley = _alleyObjects[i];
+    alley.z -= driftZ;
+    if (alley.z < -30.0) {
+      alley.z += 220.0;
+    }
+    alley.group.position.z = alley.z;
+  }
+
+  // 4. Gizemli Noir Yayaların Hareketi ve Animasyonu (Pedestrians)
+  for (let i = 0; i < _pedestrianObjects.length; i++) {
+    const ped = _pedestrianObjects[i];
+    // Yürüme hızı + dünyanın bağıl geri akışı (driftZ)
+    ped.z += (ped.speed * delta) - driftZ;
+    if (ped.z < -25.0) {
+      ped.z += 220.0;
+    } else if (ped.z > 210.0) {
+      ped.z -= 220.0;
+    }
+    ped.group.position.z = ped.z;
+
+    // Yürüme yaylanması veya dururken nefes alma animasyonu
+    ped.phase += delta * (ped.isWalking ? 4.8 : 1.4);
+    if (ped.isWalking) {
+      ped.group.position.y = 0.14 + Math.abs(Math.sin(ped.phase)) * 0.038;
+      ped.group.rotation.z = Math.sin(ped.phase) * 0.032;
+    } else {
+      ped.group.position.y = 0.14 + Math.sin(ped.phase) * 0.008;
+      ped.group.rotation.z = Math.sin(ped.phase * 0.5) * 0.012;
+    }
+
+    // Karakterlerin baş bölgesine çok hafif Y-ekseni etrafa bakınma salınımı (±10° ≈ ±0.17 rad)
+    if (ped.headRef) {
+      ped.headRef.rotation.y = Math.sin(ped.phase * 0.35 + ped.headOffset) * 0.17;
+    }
+  }
 }
 
 /**
@@ -326,4 +675,11 @@ export function setBuildingLightningFactor(factor) {
   const intensity = 0.30 + factor * 1.70; // 0.30 -> 2.00
   if (_meshLeft  && _meshLeft.material)  _meshLeft.material.emissiveIntensity = intensity;
   if (_meshRight && _meshRight.material) _meshRight.material.emissiveIntensity = intensity;
+}
+
+/**
+ * Yayaların salt-okunur durumlarını döndürür (Temas gölgeleri için).
+ */
+export function getPedestrianData() {
+  return _pedestrianObjects;
 }

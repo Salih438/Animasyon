@@ -260,3 +260,85 @@ export function toggleMute() {
   _masterGain.gain.value = _isMuted ? 0.0 : 0.75;
   return _isMuted;
 }
+
+/**
+ * Islak zeminde yürüme sesi (Prosedürel Web Audio API — Harici dosya yok).
+ * Yürüyüş fazına senkronize olarak sol ve sağ adımlarda tetiklenir.
+ *
+ * @param {boolean} [isLeft=false] — Sol veya sağ ayak ayrımı
+ */
+export function playFootstep(isLeft = false) {
+  if (!_audioCtx) return;
+  if (_audioCtx.state === 'suspended') {
+    _audioCtx.resume();
+  }
+  if (_audioCtx.state !== 'running' || _isMuted) return;
+
+  const now = _audioCtx.currentTime;
+  const duration = 0.055; // 55 ms kısa, tok sıçrama ve temas
+
+  // 1. Islak Su Sıçraması (Wet Squelch / Splash — Filtered Noise Burst)
+  const sampleRate = _audioCtx.sampleRate;
+  const frameCount = Math.floor(sampleRate * duration);
+  const noiseBuffer = _audioCtx.createBuffer(1, frameCount, sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+
+  for (let i = 0; i < frameCount; i++) {
+    // Hızlı üstel sönümlü gürültü darbesi
+    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (frameCount * 0.28));
+  }
+
+  const noiseSrc = _audioCtx.createBufferSource();
+  noiseSrc.buffer = noiseBuffer;
+
+  const filter = _audioCtx.createBiquadFilter();
+  filter.type = 'bandpass';
+  // Sol ve sağ adım için doğal formant/frekans farkı (robotik tekrarı önler)
+  const centerFreq = isLeft ? 1460 : 1320;
+  filter.frequency.setValueAtTime(centerFreq, now);
+  filter.Q.value = 2.4;
+
+  const gain = _audioCtx.createGain();
+  gain.gain.setValueAtTime(0.001, now);
+  gain.gain.linearRampToValueAtTime(0.085, now + 0.006);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+  // Stereo derinlik (Sol adım hafif sola, sağ adım hafif sağa)
+  let panner = null;
+  if (typeof _audioCtx.createStereoPanner === 'function') {
+    panner = _audioCtx.createStereoPanner();
+    panner.pan.setValueAtTime(isLeft ? -0.16 : 0.16, now);
+  }
+
+  noiseSrc.connect(filter);
+  filter.connect(gain);
+  if (panner) {
+    gain.connect(panner);
+    panner.connect(_masterGain);
+  } else {
+    gain.connect(_masterGain);
+  }
+
+  noiseSrc.start(now);
+  noiseSrc.stop(now + duration);
+
+  // 2. Ayakkabı Tabanı Zemin Temas Darbesi (Shoe Impact Thud)
+  const thudOsc = _audioCtx.createOscillator();
+  thudOsc.type = 'sine';
+  const startFreq = isLeft ? 84 : 76;
+  const endFreq   = isLeft ? 42 : 38;
+  thudOsc.frequency.setValueAtTime(startFreq, now);
+  thudOsc.frequency.exponentialRampToValueAtTime(endFreq, now + 0.035);
+
+  const thudGain = _audioCtx.createGain();
+  thudGain.gain.setValueAtTime(0.001, now);
+  thudGain.gain.linearRampToValueAtTime(0.065, now + 0.004);
+  thudGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.040);
+
+  thudOsc.connect(thudGain);
+  thudGain.connect(_masterGain);
+
+  thudOsc.start(now);
+  thudOsc.stop(now + 0.040);
+}
+

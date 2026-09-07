@@ -37,9 +37,9 @@ export const LAMPS_PER_SIDE  = 8;
 export const LIGHT_POOL_SIZE = 4; // GPU forward rendering için sabit 4 PointLight
 
 // Yerleşim koordinatları (Kaldırım bordür kenarlarına oturan gerçekçi 3D sokak lambaları)
-const RIGHT_POLE_X    =  5.95; // Sağ bordür üzerinde
-const LEFT_POLE_X     = -5.95; // Sol bordür üzerinde
-const LAMP_ARM_LEN    =  1.50; // Üst kolun yola doğru yatay uzantısı (m)
+const RIGHT_POLE_X    = -2.75; // Sağ bordür üzerinde (Kameranın sol kenarında, cadde ile yürüdüğümüz kaldırım sınırı)
+const LEFT_POLE_X     =  6.35; // Karşı sol bordür üzerinde
+const LAMP_ARM_LEN    =  1.40; // Üst kolun yola doğru yatay uzantısı (m)
 const POLE_BASE_Y     =  0.00; // Asfalt/bordür taban kotu
 const BULB_REL_Y      =  5.25; // Ampulün direk tabanına göre göreli yüksekliği
 const BULB_WORLD_Y    = POLE_BASE_Y + BULB_REL_Y; // ~5.25 m
@@ -61,30 +61,30 @@ const _lampData = new Array(LAMP_COUNT);
   const zPositions = [2, 16, 32, 50, 72, 100, 135, 180];
   for (let i = 0; i < LAMPS_PER_SIDE; i++) {
     const z = zPositions[i];
-    // Sağ lamba (i = 0..7)
-    _lampData[i] = Object.freeze({
+    // Sağ lamba (i = 0..7) — kolu yola doğru (+X) uzanır
+    _lampData[i] = {
       id: i,
       side: 'right',
       poleX: RIGHT_POLE_X,
       poleY: POLE_BASE_Y,
       z: z,
-      bulbX: RIGHT_POLE_X - LAMP_ARM_LEN,
+      bulbX: RIGHT_POLE_X + LAMP_ARM_LEN,
       bulbY: BULB_WORLD_Y,
       bulbZ: z,
-    });
+    };
 
-    // Sol lamba (i = 8..15)
+    // Sol lamba (i = 8..15) — kolu yola doğru (-X) uzanır
     const id = LAMPS_PER_SIDE + i;
-    _lampData[id] = Object.freeze({
+    _lampData[id] = {
       id: id,
       side: 'left',
       poleX: LEFT_POLE_X,
       poleY: POLE_BASE_Y,
       z: z,
-      bulbX: LEFT_POLE_X + LAMP_ARM_LEN,
+      bulbX: LEFT_POLE_X - LAMP_ARM_LEN,
       bulbY: BULB_WORLD_Y,
       bulbZ: z,
-    });
+    };
   }
 })();
 
@@ -99,6 +99,7 @@ let _moonLight     = null;
 
 let _lampPoleMesh  = null; // THREE.InstancedMesh (16 adet birleşik metalik gövde)
 let _lampBulbMesh  = null; // THREE.InstancedMesh (16 adet emissive ampul)
+let _lampBeamMesh  = null; // THREE.InstancedMesh (En yakın 4 sokak lambası volumetrik ışık konisi)
 
 // 4'lü PointLight havuzu
 const _lightPool   = new Array(LIGHT_POOL_SIZE);
@@ -246,7 +247,8 @@ function _buildLampposts(parentGroup) {
     const l = _lampData[i];
     _pos.set(l.poleX, l.poleY, l.z);
 
-    const yaw = (l.side === 'left') ? Math.PI : 0.0;
+    // Sağ lamba yola doğru (+X), sol lamba yola doğru (-X) bakar
+    const yaw = (l.side === 'right') ? Math.PI : 0.0;
     _rotY.set(0, yaw, 0);
     _quat.setFromEuler(_rotY);
 
@@ -263,6 +265,74 @@ function _buildLampposts(parentGroup) {
   _lampBulbMesh.computeBoundingSphere();
 
   parentGroup.add(_lampPoleMesh, _lampBulbMesh);
+}
+
+function _createLampBeamTexture() {
+  if (typeof document === 'undefined') return null;
+
+  const w = 128, h = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width  = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  // Saydam arka plan
+  ctx.clearRect(0, 0, w, h);
+
+  // Tepe noktasından (ampul) aşağıya doğru yumuşak üstel sönüm
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0.00, 'rgba(255, 205, 120, 0.90)');
+  grad.addColorStop(0.08, 'rgba(255, 185,  95, 0.65)');
+  grad.addColorStop(0.35, 'rgba(255, 160,  65, 0.28)');
+  grad.addColorStop(0.70, 'rgba(255, 140,  45, 0.08)');
+  grad.addColorStop(1.00, 'rgba(255, 120,  30, 0.00)');
+
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Yan kenar yumuşatması (sol ve sağ kenarlara doğru dikişsiz geçiş)
+  const edgeGrad = ctx.createLinearGradient(0, 0, w, 0);
+  edgeGrad.addColorStop(0.0, 'rgba(0, 0, 0, 1.0)');
+  edgeGrad.addColorStop(0.3, 'rgba(0, 0, 0, 0.0)');
+  edgeGrad.addColorStop(0.7, 'rgba(0, 0, 0, 0.0)');
+  edgeGrad.addColorStop(1.0, 'rgba(0, 0, 0, 1.0)');
+
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = edgeGrad;
+  ctx.fillRect(0, 0, w, h);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  return texture;
+}
+
+function _buildVolumetricBeams(parentGroup) {
+  // Açık tabanlı dikey koni geometrisi (tepe ampulde Y=0, taban asfalta doğru Y=-5.25m)
+  const beamGeo = new THREE.ConeGeometry(2.3, BULB_REL_Y, 16, 1, true);
+  beamGeo.translate(0, -BULB_REL_Y / 2, 0);
+
+  const matBeam = new THREE.MeshBasicMaterial({
+    map:         _createLampBeamTexture(),
+    color:       0xffb455,
+    transparent: true,
+    opacity:     0.32,
+    blending:    THREE.AdditiveBlending,
+    depthWrite:  false,
+    side:        THREE.DoubleSide,
+  });
+
+  _lampBeamMesh = new THREE.InstancedMesh(beamGeo, matBeam, LIGHT_POOL_SIZE);
+  _lampBeamMesh.name = 'lampposts_volumetric_beams';
+  _lampBeamMesh.frustumCulled = false;
+
+  const zeroM4 = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (let k = 0; k < LIGHT_POOL_SIZE; k++) {
+    _lampBeamMesh.setMatrixAt(k, zeroM4);
+  }
+  _lampBeamMesh.instanceMatrix.needsUpdate = true;
+
+  parentGroup.add(_lampBeamMesh);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -299,11 +369,11 @@ export async function initLighting(scene, group, config) {
   _ambientLight.name = 'ambientLight';
   lightsGroup.add(_ambientLight);
 
-  // ── 2b. Walker Rim & Fill Light (Karakteri arkadan aydınlatan sinematik dolgu) ──
-  const walkerFill = new THREE.DirectionalLight(0xaad0ff, 1.10);
-  walkerFill.name = 'walkerFillLight';
-  walkerFill.position.set(0.5, 4.5, -6.0);
-  walkerFill.target.position.set(0.0, 1.2, 2.0);
+  // ── 2b. Viewmodel & Street Forward Rim Light ──────────────────────────────
+  const walkerFill = new THREE.DirectionalLight(0xaad0ff, 0.85);
+  walkerFill.name = 'streetRimLight';
+  walkerFill.position.set(2.2, 3.5, -2.0);
+  walkerFill.target.position.set(2.2, 1.2, 20.0);
   lightsGroup.add(walkerFill);
   lightsGroup.add(walkerFill.target);
 
@@ -329,6 +399,9 @@ export async function initLighting(scene, group, config) {
 
   // ── 4. 16 Sokak Lambasını İnşa Et ────────────────────────────────────────
   _buildLampposts(worldGroup);
+
+  // ── 4b. En Yakın 4 Lamba İçin Volumetrik Işık Huzmelerini İnşa Et ─────────
+  _buildVolumetricBeams(lightsGroup);
 
   // ── 5. Dinamik 4-PointLight Havuzunu Başlat ──────────────────────────────
   for (let k = 0; k < LIGHT_POOL_SIZE; k++) {
@@ -427,9 +500,34 @@ export function updateLighting(delta, cameraPos) {
   // Yağmur Parçacıkları Parlaklık Senkronizasyonu
   setRainLightningFactor(_lightningFactor);
 
+  // ── 2c. Sokak Lambalarının Z Akışı (Sokak lambaları başımızın üstünden arkaya doğru kaysın) ──
+  const driftZ = 2.8 * dt;
+  for (let j = 0; j < LAMP_COUNT; j++) {
+    const l = _lampData[j];
+    l.z -= driftZ;
+    l.bulbZ = l.z;
+
+    // Kameranın arkasına geçtiğinde (-16 m) ileride yeniden doğ (+180 m)
+    if (l.z < -16.0) {
+      l.z += 196.0;
+      l.bulbZ = l.z;
+    }
+
+    _pos.set(l.poleX, l.poleY, l.z);
+    const yaw = (l.side === 'right') ? Math.PI : 0.0;
+    _rotY.set(0, yaw, 0);
+    _quat.setFromEuler(_rotY);
+    _m4.compose(_pos, _quat, _scale);
+
+    if (_lampPoleMesh) _lampPoleMesh.setMatrixAt(j, _m4);
+    if (_lampBulbMesh) _lampBulbMesh.setMatrixAt(j, _m4);
+  }
+  if (_lampPoleMesh) _lampPoleMesh.instanceMatrix.needsUpdate = true;
+  if (_lampBulbMesh) _lampBulbMesh.instanceMatrix.needsUpdate = true;
+
   // ── 3. Dinamik 4-PointLight Sokak Lambaları Havuzu ────────────────────────
-  const focusX = 0.0;
-  const focusZ = (cameraPos && typeof cameraPos.z === 'number') ? cameraPos.z : 18.0;
+  const focusX = (cameraPos && typeof cameraPos.x === 'number') ? cameraPos.x : -3.8;
+  const focusZ = (cameraPos && typeof cameraPos.z === 'number') ? cameraPos.z : 0.0;
 
   _closestDists[0] = _closestDists[1] = _closestDists[2] = _closestDists[3] = Infinity;
   _closestIndices[0] = _closestIndices[1] = _closestIndices[2] = _closestIndices[3] = -1;
@@ -481,6 +579,28 @@ export function updateLighting(delta, cameraPos) {
       _poolCurrentIntensity[k] += (0.0 - _poolCurrentIntensity[k]) * Math.min(1.0, dt * 6.0);
       pl.intensity = _poolCurrentIntensity[k];
     }
+
+    // Volumetrik ışık konisi senkronizasyonu
+    if (_lampBeamMesh) {
+      if (lampId >= 0 && lampId < LAMP_COUNT && _poolCurrentIntensity[k] > 0.05) {
+        const lamp = _lampData[lampId];
+        _pos.set(lamp.bulbX, lamp.bulbY, lamp.bulbZ);
+        const scaleVal = Math.min(1.0, _poolCurrentIntensity[k] / TARGET_INTENSITY);
+        _scale.set(scaleVal, 1.0, scaleVal);
+        _quat.identity();
+        _m4.compose(_pos, _quat, _scale);
+        _lampBeamMesh.setMatrixAt(k, _m4);
+      } else {
+        _scale.set(0, 0, 0);
+        _pos.set(0, -100, 0);
+        _m4.compose(_pos, _quat, _scale);
+        _lampBeamMesh.setMatrixAt(k, _m4);
+      }
+    }
+  }
+
+  if (_lampBeamMesh) {
+    _lampBeamMesh.instanceMatrix.needsUpdate = true;
   }
 }
 

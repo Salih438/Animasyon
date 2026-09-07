@@ -1,3 +1,4 @@
+
 /**
  * scene/traffic.js — Phase 6: Traffic & Vehicle Dynamics
  *
@@ -27,16 +28,16 @@ import * as THREE from 'three';
 export const CAR_COUNT       = 12;
 export const CARS_PER_LANE   = 6;
 
-// Sabit kamera & akan dünya referans hızı (m/s)
-export const CAM_SPD_SEC     = 28.0;
+// İnsan yürüyüş referans hızı (m/s) — ground.js WALK_SPEED ile senkron
+export const WALK_SPEED_SEC   = 2.8;
 
-// Şerit merkezleri (ground.js yol genişliği 11.6 m: X in [-5.8, +5.8])
-const LANE_X_INCOMING        = -3.2; // Sol şerit (Karşıdan gelenler)
-const LANE_X_OUTGOING        =  3.2; // Sağ şerit (Aynı yönde gidenler — Walker X=0'a 3.2 m güvenli mesafe)
+// Şerit merkezleri (Kamera baseX = -3.80 m sağ kaldırımda yürür, araçlar solumuzda X >= -2.55 m akar)
+const LANE_X_OUTGOING        = -0.45; // Sağ şerit (Önümüzde gidenler — kırmızı stoplar, kameranın 3.3m solundan akar)
+const LANE_X_INCOMING        =  3.90; // Karşı sol şerit (Karşıdan gelenler — parlak farlar)
 
 // Respawn Z sınırları (Sürekli aktif ve yoğun şehir trafiği akışı)
-const Z_INCOMING_RESPAWN_MIN = 240.0;
-const Z_INCOMING_RESPAWN_MAX = 350.0;
+const Z_INCOMING_RESPAWN_MIN = 220.0;
+const Z_INCOMING_RESPAWN_MAX = 340.0;
 const Z_INCOMING_DESPAWN     = -25.0; // Kameranın arkasına geçme sınırı
 
 const Z_OUTGOING_RESPAWN_MIN = -35.0;
@@ -70,10 +71,24 @@ const CAR_COLORS = Object.freeze([
 const _carObjects = new Array(CAR_COUNT);
 
 // Paylaşılan materyaller
-let _matGlass     = null; // Karartılmış parlak otomotiv camı
-let _matWheel     = null; // Mat kauçuk lastik & çelik jant
-let _matHeadlight = null; // Parlak beyaz emissive ön far
-let _matTaillight = null; // Parlak kırmızı emissive arka stop
+let _matGlass         = null; // Karartılmış parlak otomotiv camı
+let _matWheel         = null; // Mat kauçuk lastik & çelik jant
+let _matHeadlight     = null; // Parlak beyaz emissive ön far
+let _matTaillight     = null; // Parlak kırmızı emissive arka stop
+let _headlightBeamMesh= null; // En yakın 2 karşı aracın çift farı (4 volumetrik ışık huzmesi)
+
+// Zero-allocation geçici matematik nesneleri
+const _m4   = new THREE.Matrix4();
+const _pos  = new THREE.Vector3();
+const _scale= new THREE.Vector3(1, 1, 1);
+const _quat = new THREE.Quaternion();
+
+// Profil bazlı far ofsetleri (Yükseklik, Z ofseti, Yarı genişlik)
+const PROFILE_HEADLIGHT_OFFSETS = {
+  sedan:     { y: 0.32 + 0.35, z: -4.70 / 2 - 0.04, halfW: 1.95 / 2 - 0.28 / 2 - 0.12 },
+  hatchback: { y: 0.30 + 0.34, z: -3.90 / 2 - 0.04, halfW: 1.84 / 2 - 0.26 / 2 - 0.12 },
+  suv:       { y: 0.38 + 0.44, z: -4.90 / 2 - 0.04, halfW: 2.06 / 2 - 0.32 / 2 - 0.12 },
+};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // GEOMETRY HELPERS (Birleşik Geometri — Draw Call Tasarrufu)
@@ -268,23 +283,23 @@ export async function initTraffic(scene, group, config) {
     let vRel, startZ, posX, headingYaw;
 
     if (isIncoming) {
-      // Karşı şerit: Kameraya doğru yaklaşır
+      // Karşı şerit: Kameraya doğru hızla yaklaşır
       posX = LANE_X_INCOMING;
-      // İçsel araç hızı: 16 - 22 m/s
-      const intrinsicSpeed = 16.0 + (laneIndex % 3) * 3.0;
-      vRel = -(intrinsicSpeed + CAM_SPD_SEC); // örn. -(19 + 28) = -47 m/s
+      // İçsel araç hızı: 18 - 24 m/s (65 - 85 km/s)
+      const intrinsicSpeed = 18.0 + (laneIndex % 3) * 3.0;
+      vRel = -(intrinsicSpeed + WALK_SPEED_SEC); // örn. -(21 + 2.8) = -23.8 m/s
       // Z dağılımı: Kameranın hemen önünden başlayarak dengeli dağılım
-      startZ = 20.0 + laneIndex * 45.0 + (laneIndex % 2) * 10.0;
+      startZ = 25.0 + laneIndex * 45.0 + (laneIndex % 2) * 10.0;
       // Rotasyon: Ön farlar doğrudan kameraya (-Z) bakar
       headingYaw = 0.0;
     } else {
-      // Aynı şerit: Kameradan uzaklaşır
+      // Aynı şerit: Kameradan yavaşça uzaklaşır / öne doğru uzar
       posX = LANE_X_OUTGOING;
-      // İçsel araç hızı: 38 - 46 m/s (kamerayı hızla sollar)
-      const intrinsicSpeed = 38.0 + (laneIndex % 3) * 4.0;
-      vRel = intrinsicSpeed - CAM_SPD_SEC; // örn. 42 - 28 = +14 m/s (uzaklaşır)
-      // Z dağılımı: Walker ve kameranın yanından başlayarak öne doğru
-      startZ = -12.0 + laneIndex * 48.0 + (laneIndex % 2) * 12.0;
+      // İçsel araç hızı: 16 - 22 m/s (58 - 80 km/s)
+      const intrinsicSpeed = 16.0 + (laneIndex % 3) * 3.0;
+      vRel = intrinsicSpeed - WALK_SPEED_SEC; // örn. 19 - 2.8 = +16.2 m/s (önde uzaklaşır)
+      // Z dağılımı: Kameranın yanından başlayarak öne doğru
+      startZ = -10.0 + laneIndex * 48.0 + (laneIndex % 2) * 12.0;
       // Rotasyon: 180° çevrilir; stop lambaları kameraya görünür
       headingYaw = Math.PI;
     }
@@ -336,6 +351,79 @@ export async function initTraffic(scene, group, config) {
       profile:     profileKey,
     };
   }
+
+  // ── En Yakın 2 Karşı Araç İçin Volumetrik Far Huzmeleri ───────────────────
+  _buildHeadlightBeams(targetGroup);
+}
+
+function _createHeadlightBeamTexture() {
+  if (typeof document === 'undefined') return null;
+
+  const w = 128, h = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width  = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Tepe noktasından (far camı) ileriye doğru yumuşak doğrusal/üstel sönüm
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0.00, 'rgba(255, 250, 235, 0.90)');
+  grad.addColorStop(0.10, 'rgba(250, 240, 220, 0.60)');
+  grad.addColorStop(0.35, 'rgba(235, 225, 205, 0.22)');
+  grad.addColorStop(0.70, 'rgba(215, 210, 195, 0.06)');
+  grad.addColorStop(1.00, 'rgba(200, 195, 180, 0.00)');
+
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, w, h);
+
+  // Yan kenar yumuşatması (sol ve sağ kenarlara doğru dikişsiz geçiş)
+  const edgeGrad = ctx.createLinearGradient(0, 0, w, 0);
+  edgeGrad.addColorStop(0.0,  'rgba(0, 0, 0, 1.0)');
+  edgeGrad.addColorStop(0.28, 'rgba(0, 0, 0, 0.0)');
+  edgeGrad.addColorStop(0.72, 'rgba(0, 0, 0, 0.0)');
+  edgeGrad.addColorStop(1.0,  'rgba(0, 0, 0, 1.0)');
+
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = edgeGrad;
+  ctx.fillRect(0, 0, w, h);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  return texture;
+}
+
+function _buildHeadlightBeams(parentGroup) {
+  // 15 metre ileri uzanan yatay koni (apex farda, taban -Z yönünde)
+  const beamLen = 15.0;
+  const beamGeo = new THREE.ConeGeometry(1.4, beamLen, 14, 1, true);
+  beamGeo.translate(0, -beamLen / 2, 0);
+  beamGeo.rotateX(Math.PI / 2); // Apex (0,0,0)'da kalır, koni -Z yönünde uzar
+
+  const matBeam = new THREE.MeshBasicMaterial({
+    map:         _createHeadlightBeamTexture(),
+    color:       0xfff8ee,
+    transparent: true,
+    opacity:     0.28,
+    blending:    THREE.AdditiveBlending,
+    depthWrite:  false,
+    side:        THREE.DoubleSide,
+  });
+
+  // En yakın 2 karşı araç * 2 far = 4 huzme
+  _headlightBeamMesh = new THREE.InstancedMesh(beamGeo, matBeam, 4);
+  _headlightBeamMesh.name = 'traffic_headlight_beams';
+  _headlightBeamMesh.frustumCulled = false;
+
+  const zeroM4 = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (let b = 0; b < 4; b++) {
+    _headlightBeamMesh.setMatrixAt(b, zeroM4);
+  }
+  _headlightBeamMesh.instanceMatrix.needsUpdate = true;
+
+  parentGroup.add(_headlightBeamMesh);
 }
 
 /**
@@ -370,6 +458,55 @@ export function updateTraffic(delta) {
 
     // 0 tahsis: sadece ilkel float konumu atanır
     c.group.position.z = c.z;
+  }
+
+  // ── Volumetrik Far Huzmelerini Güncelle (En yakın 2 karşı araç) ────────────
+  if (_headlightBeamMesh) {
+    let closest1 = null, closest2 = null;
+    let dist1 = Infinity, dist2 = Infinity;
+
+    for (let i = 0; i < CARS_PER_LANE; i++) {
+      const c = _carObjects[i]; // incoming araçlar
+      // Kameranın önünde ve görünür menzilde mi?
+      if (c.z > -4.0 && c.z < 150.0) {
+        if (c.z < dist1) {
+          dist2 = dist1; closest2 = closest1;
+          dist1 = c.z;   closest1 = c;
+        } else if (c.z < dist2) {
+          dist2 = c.z;   closest2 = c;
+        }
+      }
+    }
+
+    const tracked = [closest1, closest2];
+    for (let t = 0; t < 2; t++) {
+      const car = tracked[t];
+      const idxL = t * 2;
+      const idxR = t * 2 + 1;
+
+      if (car) {
+        const off = PROFILE_HEADLIGHT_OFFSETS[car.profile] || PROFILE_HEADLIGHT_OFFSETS.sedan;
+        _scale.set(1, 1, 1);
+        _quat.identity();
+
+        // Sol ön far
+        _pos.set(car.x - off.halfW, off.y, car.z + off.z);
+        _m4.compose(_pos, _quat, _scale);
+        _headlightBeamMesh.setMatrixAt(idxL, _m4);
+
+        // Sağ ön far
+        _pos.set(car.x + off.halfW, off.y, car.z + off.z);
+        _m4.compose(_pos, _quat, _scale);
+        _headlightBeamMesh.setMatrixAt(idxR, _m4);
+      } else {
+        _scale.set(0, 0, 0);
+        _pos.set(0, -100, 0);
+        _m4.compose(_pos, _quat, _scale);
+        _headlightBeamMesh.setMatrixAt(idxL, _m4);
+        _headlightBeamMesh.setMatrixAt(idxR, _m4);
+      }
+    }
+    _headlightBeamMesh.instanceMatrix.needsUpdate = true;
   }
 }
 
