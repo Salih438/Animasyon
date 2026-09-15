@@ -64,6 +64,25 @@ let _divertVy    = null; // Float32Array(RAIN_COUNT)
 let _divertVz    = null; // Float32Array(RAIN_COUNT)
 let _isDiverted  = null; // Uint8Array(RAIN_COUNT)
 
+// ─── Zemin Sıçraması (Ground Splash InstancedMesh Havuzu) ───────────────────
+export const SPLASH_POOL_SIZE = 64;
+let _splashMesh     = null;
+const _splashActive  = new Uint8Array(SPLASH_POOL_SIZE);
+const _splashLife    = new Float32Array(SPLASH_POOL_SIZE);
+const _splashMaxLife = new Float32Array(SPLASH_POOL_SIZE);
+const _splashScale   = new Float32Array(SPLASH_POOL_SIZE);
+const _splashX       = new Float32Array(SPLASH_POOL_SIZE);
+const _splashY       = new Float32Array(SPLASH_POOL_SIZE);
+const _splashZ       = new Float32Array(SPLASH_POOL_SIZE);
+let   _splashPoolPtr = 0;
+
+// Sıfır tahsisli yardımcı matematik nesneleri
+const _splashMat4  = new THREE.Matrix4();
+const _splashPos   = new THREE.Vector3();
+const _splashScl   = new THREE.Vector3();
+const _splashColor = new THREE.Color();
+const _splashQuat  = new THREE.Quaternion(); // Identity (düz yere paralel)
+
 /**
  * Donuk kare veya yuvarlak toplar yerine jilet gibi ince, yarı-saydam
  * dikey iğne çizgisi (streak) üreten CanvasTexture.
@@ -97,6 +116,59 @@ function _createRainTexture() {
   ctx.moveTo(width / 2, 2);
   ctx.lineTo(width / 2, height - 2);
   ctx.stroke();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * Su sıçraması için dairesel konsantrik halka ve sıçrama zerrecikleri üreten CanvasTexture.
+ */
+function _createSplashTexture() {
+  if (typeof document === 'undefined') return null;
+
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width  = size;
+  canvas.height = size;
+  const ctx     = canvas.getContext('2d');
+  ctx.clearRect(0, 0, size, size);
+
+  const cx = size / 2;
+  const cy = size / 2;
+
+  // Dış ana sıçrama halkası (Impact ripple)
+  ctx.beginPath();
+  ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(215, 235, 255, 0.85)';
+  ctx.lineWidth = 3.0;
+  ctx.stroke();
+
+  // İç konsantrik dalga
+  ctx.beginPath();
+  ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(230, 245, 255, 0.50)';
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+
+  // Merkez damla çarpma noktası
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+  ctx.fill();
+
+  // 4 radyal mikro su zerresi
+  const rad = 25;
+  for (let a = 0; a < 4; a++) {
+    const angle = (a * Math.PI / 2) + 0.38;
+    const sx = cx + Math.cos(angle) * rad;
+    const sy = cy + Math.sin(angle) * rad;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 1.8, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(210, 235, 255, 0.85)';
+    ctx.fill();
+  }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.needsUpdate = true;
@@ -154,13 +226,62 @@ export async function initRain(scene, group, config) {
   _pointsMesh.frustumCulled = false;
 
   targetGroup.add(_pointsMesh);
+
+  // ── Zemin Sıçramaları (Splash InstancedMesh) ──────────────────────────────
+  const splashTex = _createSplashTexture();
+  const splashGeo = new THREE.PlaneGeometry(0.36, 0.36);
+  splashGeo.rotateX(-Math.PI / 2); // Yere yatay oturur
+
+  const splashMat = new THREE.MeshBasicMaterial({
+    map:         splashTex,
+    color:       0xd0e6ff,
+    transparent: true,
+    opacity:     0.85,
+    blending:    THREE.AdditiveBlending,
+    depthWrite:  false,
+    side:        THREE.DoubleSide,
+  });
+
+  _splashMesh = new THREE.InstancedMesh(splashGeo, splashMat, SPLASH_POOL_SIZE);
+  _splashMesh.name = 'rainSplashes';
+  _splashMesh.frustumCulled = false;
+
+  // Başlangıçta tüm instance'ları yerin altına sakla
+  _splashPos.set(0, -999, 0);
+  _splashScl.set(0, 0, 0);
+  _splashMat4.compose(_splashPos, _splashQuat, _splashScl);
+  for (let k = 0; k < SPLASH_POOL_SIZE; k++) {
+    _splashMesh.setMatrixAt(k, _splashMat4);
+    _splashActive[k] = 0;
+  }
+  _splashMesh.instanceMatrix.needsUpdate = true;
+  _splashMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(SPLASH_POOL_SIZE * 3), 3);
+
+  targetGroup.add(_splashMesh);
 }
 
 /**
- * Her frame yağmur fiziğini günceller.
+ * Zemine veya araç tekerleği arkasına tek bir su sıçraması fırlatır.
+ * O(1) circular ring-buffer — sıfır tahsis.
+ */
+export function spawnSplash(x, y, z, scale = 1.0, life = 0.20) {
+  const id = _splashPoolPtr;
+  _splashPoolPtr = (_splashPoolPtr + 1) % SPLASH_POOL_SIZE;
+
+  _splashActive[id]  = 1;
+  _splashLife[id]    = life;
+  _splashMaxLife[id] = life;
+  _splashScale[id]   = scale;
+  _splashX[id]       = x;
+  _splashY[id]       = y;
+  _splashZ[id]       = z;
+}
+
+/**
+ * Her frame yağmur fiziğini ve zemin sıçramalarını günceller.
  * Zero-allocation kuralına kesinlikle uyar.
  */
-export function updateRain(delta) {
+export function updateRain(delta, cameraPos) {
   if (!_geometry || !_positions) return;
 
   const dt = Math.min(delta, 0.1);
@@ -240,10 +361,19 @@ export function updateRain(delta) {
     }
 
     // 4. Zemin / Kaldırım Çarpışması & Respawn
-    const isSidewalk = px >= SIDEWALK_X_INNER;
-    const groundLimitY = isSidewalk ? SIDEWALK_Y_SURF : BOX_Y_MIN;
+    const isSidewalk = (px < -2.2 || px > 6.8);
+    const groundLimitY = isSidewalk ? 0.145 : 0.00;
 
     if (py <= groundLimitY) {
+      // Sadece kameraya R <= 18m mesafedeki damlalar için sıçrama oluştur
+      const camX = (cameraPos && typeof cameraPos.x === 'number') ? cameraPos.x : -4.50;
+      const camZ = (cameraPos && typeof cameraPos.z === 'number') ? cameraPos.z : 0.0;
+      const dxCam = px - camX;
+      const dzCam = pz - camZ;
+      if (dxCam * dxCam + dzCam * dzCam <= 324.0) {
+        spawnSplash(px, groundLimitY + 0.006, pz, 0.75 + Math.random() * 0.40, 0.18 + Math.random() * 0.05);
+      }
+
       py = RESPAWN_Y_MIN + Math.random() * (RESPAWN_Y_MAX - RESPAWN_Y_MIN);
       px = BOX_X_MIN + Math.random() * BOX_X_SPAN;
       pz = BOX_Z_MIN + Math.random() * BOX_Z_SPAN;
@@ -267,6 +397,43 @@ export function updateRain(delta) {
   }
 
   _geometry.attributes.position.needsUpdate = true;
+
+  // ── 6. Aktif Zemin Sıçramalarının Yaşam Döngüsü ve Animasyonu ─────────────
+  if (_splashMesh) {
+    let needsSplashUpdate = false;
+    for (let k = 0; k < SPLASH_POOL_SIZE; k++) {
+      if (_splashActive[k] === 0) continue;
+
+      _splashLife[k] -= dt;
+      needsSplashUpdate = true;
+
+      if (_splashLife[k] <= 0.0) {
+        _splashActive[k] = 0;
+        _splashPos.set(0, -999, 0);
+        _splashScl.set(0, 0, 0);
+        _splashMat4.compose(_splashPos, _splashQuat, _splashScl);
+        _splashMesh.setMatrixAt(k, _splashMat4);
+        continue;
+      }
+
+      const progress = 1.0 - (_splashLife[k] / _splashMaxLife[k]); // 0.0 -> 1.0
+      const currentScale = _splashScale[k] * (0.22 + progress * 1.15);
+      const alpha = Math.max(0.0, 1.0 - progress);
+
+      _splashPos.set(_splashX[k], _splashY[k], _splashZ[k]);
+      _splashScl.set(currentScale, 1.0, currentScale);
+      _splashMat4.compose(_splashPos, _splashQuat, _splashScl);
+      _splashMesh.setMatrixAt(k, _splashMat4);
+
+      _splashColor.setRGB(0.70 * alpha, 0.85 * alpha, 1.0 * alpha);
+      _splashMesh.setColorAt(k, _splashColor);
+    }
+
+    if (needsSplashUpdate) {
+      _splashMesh.instanceMatrix.needsUpdate = true;
+      if (_splashMesh.instanceColor) _splashMesh.instanceColor.needsUpdate = true;
+    }
+  }
 }
 
 /**

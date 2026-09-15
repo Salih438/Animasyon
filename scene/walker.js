@@ -267,10 +267,12 @@ function _buildFpsUmbrella(mat) {
  * @param {THREE.PerspectiveCamera}[camera]
  */
 export async function initWalker(scene, group, config, camera) {
+  const showUmb = config?.walker?.showUmbrella ?? false;
   const mat = _createMaterials();
 
   // FPS Viewmodel şemsiyesini oluştur
   _fpsGroup = _buildFpsUmbrella(mat);
+  _fpsGroup.visible = showUmb;
 
   // Baz transformlarını ayarla
   _fpsGroup.position.set(BASE_POS.x, BASE_POS.y, BASE_POS.z);
@@ -309,7 +311,7 @@ export async function initWalker(scene, group, config, camera) {
  * @param {number} delta — Frame delta süresi (saniye)
  */
 export function updateWalker(delta, camera, headYaw = 0.0) {
-  if (!_fpsGroup) return;
+  if (!_fpsGroup || !_fpsGroup.visible) return;
 
   _walkTime += delta * STRIDE_FREQ;
 

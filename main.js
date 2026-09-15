@@ -34,16 +34,21 @@ import { initShadows, updateShadows } from './scene/shadows.js';
 // ─── Central Configuration ──────────────────────────────────────────────────
 export const CONFIG = Object.freeze({
 
-  /** Kamera — First-Person POV (Sağ Kaldırım Yürüyüşü) */
+  /** Kamera — First-Person POV (Ferah Sağ Kaldırım Yürüyüşü) */
   camera: {
     fov:      54,       // Sinematik geniş açı
     near:     0.1,
     far:      4000,
-    // Sağ kaldırımda güvenli yürüyüş (baseX = -3.80m, baseY = 1.78m: kaldırım + insan boyu)
-    baseX:   -3.80,
+    // Geniş kaldırımın tam ortasında (baseX = -4.50m: bordürden 1.8m, binalardan 3.3m ferah mesafe)
+    baseX:   -4.50,
     baseY:    1.78,
     baseZ:    0.00,
-    lookAt:   { x: -1.00, y: 1.55, z: 120.0 },
+    lookAt:   { x: -3.20, y: 1.55, z: 120.0 }, // Kaldırım ve cadde perspektifine doğal bakış
+  },
+
+  /** Karakter & Viewmodel */
+  walker: {
+    showUmbrella: false, // Ekranı bölen veya görüşü kapatan yapay mesh'leri önler
   },
 
   /** Renderer */
@@ -52,11 +57,11 @@ export const CONFIG = Object.freeze({
     powerPreference: 'high-performance',
   },
 
-  /** Atmosfer */
+  /** Atmosfer (Derin Film Noir Gece) */
   atmosphere: {
-    backgroundColor: 0x05050a,
-    fogColor:        0x050510,
-    fogDensity:      0.00045,
+    backgroundColor: 0x030306,
+    fogColor:        0x030308,
+    fogDensity:      0.00038,
   },
 
   /** Dünya hareketi — p5.js CAM_SPD=6 birim/frame → saniyeye normalize */
@@ -132,6 +137,9 @@ function initRenderer() {
   renderer.shadowMap.enabled = CONFIG.shadow.enabled;
   renderer.shadowMap.type    = THREE.PCFSoftShadowMap;
 
+  // Clear color (arka plan sızmalarını önleyen tam opak derin gece rengi)
+  renderer.setClearColor(CONFIG.atmosphere.backgroundColor, 1.0);
+
   if (typeof window !== 'undefined') {
     window.__renderer = renderer;
   }
@@ -148,6 +156,10 @@ function initScene() {
     CONFIG.atmosphere.fogColor,
     CONFIG.atmosphere.fogDensity
   );
+
+  if (typeof window !== 'undefined') {
+    window.__scene = scene;
+  }
 }
 
 function initCamera() {
@@ -165,6 +177,10 @@ function initCamera() {
 
   // FPS Viewmodel şemsiyesini desteklemek için kamera sahneye eklenmelidir
   scene.add(camera);
+
+  if (typeof window !== 'undefined') {
+    window.__camera = camera;
+  }
 }
 
 function initClock() {
@@ -239,10 +255,12 @@ function onResize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
 
+  const pr = Math.min(window.devicePixelRatio || 1, CONFIG.renderer.maxPixelRatio);
+  renderer.setPixelRatio(pr);
+  renderer.setSize(w, h);
+
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
-
-  renderer.setSize(w, h);
 
   // Reflector render target boyutunu da güncelle (Phase 8)
   onResizeGround(w, h);
@@ -313,7 +331,7 @@ function update(delta) {
   updateWorld(delta);
   updateGround(delta);
   updateWalker(delta, camera, _headYaw);
-  updateRain(delta);
+  updateRain(delta, camera?.position);
   updateLighting(delta, camera?.position);
   updateTraffic(delta);
   updateShadows(camera?.position);
@@ -357,8 +375,8 @@ async function main() {
 
   // 2. Modüller (Phase 1'de stub, Phase 2+ gerçek içerik)
   await initLighting(scene, groups.lights, CONFIG);
-  await initGround(scene, groups.ground, CONFIG);
-  await initWorld(scene, groups.world, CONFIG);
+  await initGround(scene, groups.ground, CONFIG, renderer);
+  await initWorld(scene, groups.world, CONFIG, renderer);
   await initWalker(scene, groups.walker, CONFIG, camera);
   await initRain(scene, groups.rain, CONFIG);
   await initTraffic(scene, groups.traffic, CONFIG);
@@ -371,6 +389,11 @@ async function main() {
   // 4. Debug araçları + test objeleri
   initDebugHelpers();
   initTestObjects();
+
+  if (typeof window !== 'undefined') {
+    window.__camera = camera;
+    window.__triggerLightning = triggerLightning;
+  }
 
   // 5. Pencere boyutlandırma dinleyicisi (Resize)
   window.addEventListener('resize', onResize);
@@ -401,7 +424,10 @@ async function main() {
     setTimeout(() => loadingEl.remove(), 700);
   }
 
-  // 8. Loop başlat
+  // 8. İlk boyut senkronizasyonunu zorla (Tüm modüllerin tek seferde hizalanması)
+  onResize();
+
+  // 9. Loop başlat
   animate();
 
   if (DEBUG) {

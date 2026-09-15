@@ -19,7 +19,7 @@
  */
 
 import * as THREE from 'three';
-import { SIDEWALK_OUTER_X, WALK_SPEED } from './ground.js';
+import { BUILDING_LINE_RIGHT, BUILDING_LINE_LEFT, WALK_SPEED } from './ground.js';
 
 // ── Sabitler ─────────────────────────────────────────────────────────────────
 const BUILDING_COUNT     = 48;
@@ -67,42 +67,129 @@ function _seed(gi, s) {
 // PENCERE DOKUSU (CanvasTexture)
 // ══════════════════════════════════════════════════════════════════════════════
 
-function _createWindowTexture(texSeed) {
+function _createWindowTexture(texSeed, maxAniso = 16) {
   if (typeof document === 'undefined') return null;
 
-  const TW = 256, TH = 512;
+  const TW = 1024, TH = 2048;
   const canvas = document.createElement('canvas');
   canvas.width  = TW;
   canvas.height = TH;
   const ctx = canvas.getContext('2d');
 
+  // Koyu granit ve tuğla cephe tabanı
   ctx.fillStyle = '#0a0d14';
   ctx.fillRect(0, 0, TW, TH);
 
-  const COLS = 6;
-  const ROWS = 10;
+  // İnce tuğla / taş derz çizgileri (Micro horizontal courses)
+  ctx.fillStyle = '#06080e';
+  for (let y = 0; y < TH; y += 12) {
+    ctx.fillRect(0, y, TW, 1);
+  }
+
+  const COLS = 24;
+  const ROWS = 36;
   const cellW = TW / COLS;
   const cellH = TH / ROWS;
-  const ww = (cellW * 0.58) | 0;
-  const wh = (cellH * 0.54) | 0;
+  const ww = (cellW * 0.65) | 0;
+  const wh = (cellH * 0.62) | 0;
 
-  for (let c = 0; c < COLS; c++) {
-    for (let r = 0; r < ROWS; r++) {
-      const lit = _hash(texSeed * 10000 + c * 100 + r) < 0.45;
-      const wx  = c * cellW + (cellW - ww) * 0.5;
-      const wy  = r * cellH + (cellH - wh) * 0.5;
+  for (let r = 0; r < ROWS; r++) {
+    const isGroundFloor = r >= ROWS - 2; // Alt 2 kat: Zemin kat vitrin ve dükkanlar
 
-      if (lit) {
-        // Sıcak sarı ve amber tonları
-        const isWarm = _hash(c * 50 + r) > 0.3;
-        ctx.fillStyle = isWarm ? 'rgba(255, 218, 130, 0.90)' : 'rgba(180, 220, 255, 0.85)';
-        ctx.fillRect(wx, wy, ww, wh);
+    // Kat arası kabartma taş silme (Architectural Cornice)
+    ctx.fillStyle = '#141824';
+    ctx.fillRect(0, r * cellH - 1, TW, 4);
+    ctx.fillStyle = '#1c2233';
+    ctx.fillRect(0, r * cellH, TW, 1);
 
-        ctx.fillStyle = 'rgba(255, 200, 80, 0.12)';
-        ctx.fillRect(wx - 2, wy - 2, ww + 4, wh + 4);
+    for (let c = 0; c < COLS; c++) {
+      const wx = c * cellW + (cellW - ww) * 0.5;
+      const wy = r * cellH + (cellH - wh) * 0.5;
+
+      if (isGroundFloor) {
+        // Zemin kat: Detaylı butik / kafe / otel vitrinleri
+        const isDoor = (c % 4 === 0);
+
+        // Koyu döküm demir dış vitrin çerçevesi
+        ctx.fillStyle = '#06080c';
+        ctx.fillRect(wx - 2, wy - 3, ww + 4, wh + 6);
+
+        if (!isDoor) {
+          // Vitrin camı iç mekan derinliği
+          const grad = ctx.createLinearGradient(wx, wy, wx, wy + wh);
+          grad.addColorStop(0.0, 'rgba(255, 220, 140, 0.95)');
+          grad.addColorStop(0.65, 'rgba(235, 185, 95, 0.88)');
+          grad.addColorStop(1.0, 'rgba(80, 50, 20, 0.92)');
+          ctx.fillStyle = grad;
+          ctx.fillRect(wx, wy, ww, wh);
+
+          // Vitrin alt ahşap/mermer koruma paneli (Kickplate)
+          ctx.fillStyle = '#121622';
+          ctx.fillRect(wx, wy + wh * 0.72, ww, wh * 0.28);
+
+          // İnce döküm demir cam bölmeleri (Transom & mullions)
+          ctx.fillStyle = '#080a10';
+          ctx.fillRect(wx + ww * 0.5 - 1, wy, 2, wh * 0.72);
+          ctx.fillRect(wx, wy + wh * 0.28, ww, 2);
+
+          // Vitrin üst tabela bandı
+          ctx.fillStyle = '#181e2e';
+          ctx.fillRect(wx - 1, wy - 3, ww + 2, 4);
+        } else {
+          // Çift kanatlı camlı giriş kapısı
+          ctx.fillStyle = '#10131d';
+          ctx.fillRect(wx, wy, ww, wh);
+
+          // Kapı üst camı (Transom light)
+          ctx.fillStyle = 'rgba(255, 200, 110, 0.75)';
+          ctx.fillRect(wx + 2, wy + 2, ww - 4, wh * 0.35);
+
+          // Kapı kanat bölmesi
+          ctx.fillStyle = '#08090e';
+          ctx.fillRect(wx + ww * 0.5 - 1, wy, 2, wh);
+
+          // Pirinç kapı kolları
+          ctx.fillStyle = '#d4af37';
+          ctx.fillRect(wx + ww * 0.5 - 3, wy + wh * 0.55, 2, 6);
+          ctx.fillRect(wx + ww * 0.5 + 2, wy + wh * 0.55, 2, 6);
+        }
       } else {
-        ctx.fillStyle = 'rgba(6, 8, 14, 0.95)';
-        ctx.fillRect(wx, wy, ww, wh);
+        // Üst katlar: Detaylı pencereler, taş söveler ve denizlikler
+        const lit = _hash(texSeed * 10000 + c * 100 + r) < 0.46;
+
+        // Taş pencere denizliği (Sill)
+        ctx.fillStyle = '#161a28';
+        ctx.fillRect(wx - 3, wy + wh, ww + 6, 3);
+        // Üst taş lento (Lintel)
+        ctx.fillRect(wx - 2, wy - 3, ww + 4, 3);
+
+        if (lit) {
+          const isWarm = _hash(c * 50 + r) > 0.25;
+          ctx.fillStyle = isWarm ? 'rgba(255, 218, 140, 0.90)' : 'rgba(175, 215, 255, 0.82)';
+          ctx.fillRect(wx, wy, ww, wh);
+
+          // 4'lü pencere ahşap bölmesi (Mullion cross)
+          ctx.fillStyle = '#0a0d14';
+          ctx.fillRect(wx + (ww / 2) - 1, wy, 2, wh);
+          ctx.fillRect(wx, wy + (wh / 2) - 1, ww, 2);
+
+          // İç mekan perde/gölge silüeti (Bazı pencerelerde yarım çekili perde)
+          if (_hash(c * 17 + r * 13) > 0.60) {
+            ctx.fillStyle = 'rgba(20, 15, 10, 0.45)';
+            ctx.fillRect(wx, wy, ww, wh * 0.40);
+          }
+        } else {
+          // Karanlık oda penceresi (gece cam yansıması)
+          ctx.fillStyle = 'rgba(10, 13, 20, 0.96)';
+          ctx.fillRect(wx, wy, ww, wh);
+          ctx.fillStyle = '#05070c';
+          ctx.fillRect(wx + 1, wy + 1, ww - 2, wh - 2);
+
+          // Koyu çerçeve
+          ctx.fillStyle = '#080a10';
+          ctx.fillRect(wx + (ww / 2) - 1, wy, 2, wh);
+          ctx.fillRect(wx, wy + (wh / 2) - 1, ww, 2);
+        }
       }
     }
   }
@@ -111,6 +198,11 @@ function _createWindowTexture(texSeed) {
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(1, 1);
+  texture.anisotropy = maxAniso;
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
   return texture;
 }
 
@@ -211,7 +303,7 @@ function _buildNeonSigns(parentGroup) {
     mesh.name = `neon_${sign.text}_${idx}`;
 
     // X pozisyonu: Bina cephesinin hemen önünde, kaldırım üstünde yola doğru sarkar
-    const posX = sign.side === 'right' ? (-SIDEWALK_OUTER_X + 0.2) : (SIDEWALK_OUTER_X - 0.2);
+    const posX = sign.side === 'right' ? (BUILDING_LINE_RIGHT + 0.35) : (BUILDING_LINE_LEFT - 0.35);
     mesh.position.set(posX, sign.y, sign.z);
 
     // Yola dik bakan blade sign açıları
@@ -233,7 +325,7 @@ function _buildAlleys(parentGroup) {
   _alleysGroup = new THREE.Group();
   _alleysGroup.name = 'city_alleys';
 
-  const alleyZPositions = [34.0, 104.0, 180.0];
+  const alleyZPositions = [42.0, 118.0, 205.0];
 
   const matPavement = new THREE.MeshStandardMaterial({
     color:     0x14161f,
@@ -260,31 +352,31 @@ function _buildAlleys(parentGroup) {
     alleyRoot.name = `alley_${idx}`;
     alleyRoot.position.set(0, 0, zPos);
 
-    // 1. Ara Sokak Zemin Taşları (Sağ kaldırımın dışından sağa doğru derinlemesine uzanır)
-    const floorGeo = new THREE.PlaneGeometry(16.0, 14.0);
+    // 1. Ara Sokak Zemin Taşları (Sağ bina hattından sağa doğru derinlemesine uzanır)
+    const floorGeo = new THREE.PlaneGeometry(16.0, 9.0);
     const floorMesh = new THREE.Mesh(floorGeo, matPavement);
     floorMesh.rotation.x = -Math.PI / 2;
-    floorMesh.position.set(-SIDEWALK_OUTER_X - 8.0, 0.138, 0);
+    floorMesh.position.set(BUILDING_LINE_RIGHT - 8.0, 0.138, 0);
     floorMesh.receiveShadow = true;
     alleyRoot.add(floorMesh);
 
-    // 2. Ara Sokak Yan Duvarları (Sokağın derin koridor hissi)
+    // 2. Ara Sokak Yan Duvarları (Sokağın derin koridor hissi - bina hattının arkasında)
     const wallGeo = new THREE.BoxGeometry(16.0, 12.0, 1.0);
     const wallNear = new THREE.Mesh(wallGeo, matWall);
-    wallNear.position.set(-SIDEWALK_OUTER_X - 8.0, 6.0, -7.0);
+    wallNear.position.set(BUILDING_LINE_RIGHT - 8.0, 6.0, -4.5);
     const wallFar = new THREE.Mesh(wallGeo, matWall);
-    wallFar.position.set(-SIDEWALK_OUTER_X - 8.0, 6.0, 7.0);
+    wallFar.position.set(BUILDING_LINE_RIGHT - 8.0, 6.0, 4.5);
     alleyRoot.add(wallNear, wallFar);
 
     // 3. Ara Sokak Köşe Feneri (Sıcak amber ışık saçar)
     const lampGeo = new THREE.BoxGeometry(0.26, 0.40, 0.26);
     const lampMesh = new THREE.Mesh(lampGeo, matLamp);
-    lampMesh.position.set(-SIDEWALK_OUTER_X - 0.15, 3.4, -6.4);
+    lampMesh.position.set(BUILDING_LINE_RIGHT - 0.20, 3.4, -4.2);
     alleyRoot.add(lampMesh);
 
     // Yerel nokta ışığı (sokağın ağzını aydınlatır)
     const pLight = new THREE.PointLight(0xff8822, 1.4, 18.0, 2.0);
-    pLight.position.set(-SIDEWALK_OUTER_X - 0.5, 3.4, -6.4);
+    pLight.position.set(BUILDING_LINE_RIGHT - 0.60, 3.4, -4.2);
     alleyRoot.add(pLight);
 
     _alleysGroup.add(alleyRoot);
@@ -466,9 +558,9 @@ function _buildPedestrians(parentGroup) {
       umbColor:  0x181a22, // Koyu çelik
       hasUmbrella: true, hasHood: false, headOffset: 3.4
     },
-    // 6. Sağ kaldırımda önümüzde yürüyen yaya (Kaldırım arkadaşı - Önümüzde Z=18m, Haki & Krem)
+    // 6. Sağ kaldırımda önümüzde uzakta yürüyen yaya (Kaldırım arkadaşı - Önümüzde Z=58m, Haki & Krem)
     {
-      id: 6, x: -4.10, z: 18.0, yaw: 0.0, speed: -0.6, isWalking: true, phase: 5.10,
+      id: 6, x: -4.30, z: 58.0, yaw: Math.PI, speed: 0.8, isWalking: true, phase: 5.10,
       scaleX: 1.00, scaleY: 0.96,
       coatColor: 0x1b2417, // Haki zeytin
       umbColor:  0x5c523e, // Bej krem
@@ -503,28 +595,35 @@ function _buildPedestrians(parentGroup) {
 // PUBLIC API
 // ══════════════════════════════════════════════════════════════════════════════
 
-export async function initWorld(scene, group, config) {
+export async function initWorld(scene, group, config, renderer) {
   const targetGroup = group || (scene && scene.getObjectByName && scene.getObjectByName('world')) || scene;
 
-  const texLeft  = _createWindowTexture(42);
-  const texRight = _createWindowTexture(137);
+  // Max Anisotropy (Donanım üst sınırı ile 16 arasında güvenli seçim)
+  const maxAniso = (renderer && renderer.capabilities && typeof renderer.capabilities.getMaxAnisotropy === 'function')
+    ? Math.min(16, renderer.capabilities.getMaxAnisotropy())
+    : 16;
+
+  const texLeft  = _createWindowTexture(42, maxAniso);
+  const texRight = _createWindowTexture(137, maxAniso);
 
   const matLeft = new THREE.MeshStandardMaterial({
-    color:             0x0a0c12,
-    roughness:         0.75,
-    metalness:         0.25,
+    color:             0x181c26,
+    map:               texLeft,
+    roughness:         0.70,
+    metalness:         0.20,
     emissiveMap:       texLeft,
-    emissive:          new THREE.Color(1.0, 0.87, 0.55),
-    emissiveIntensity: 0.30,
+    emissive:          new THREE.Color(1.0, 0.88, 0.60),
+    emissiveIntensity: 0.28,
   });
 
   const matRight = new THREE.MeshStandardMaterial({
-    color:             0x0a0c12,
-    roughness:         0.75,
-    metalness:         0.25,
+    color:             0x181c26,
+    map:               texRight,
+    roughness:         0.70,
+    metalness:         0.20,
     emissiveMap:       texRight,
-    emissive:          new THREE.Color(1.0, 0.87, 0.55),
-    emissiveIntensity: 0.30,
+    emissive:          new THREE.Color(1.0, 0.88, 0.60),
+    emissiveIntensity: 0.28,
   });
 
   const unitGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -555,30 +654,30 @@ export async function initWorld(scene, group, config) {
 
 function _buildSide(sideIndex, sideName, mesh) {
   const isRight = sideIndex === 1;
+  const facadeLine = isRight ? BUILDING_LINE_RIGHT : BUILDING_LINE_LEFT;
+
+  // Kameranın hemen arkasından (-45 m) başlayarak kesintisiz bitişik nizam bina dizisi
+  let currentZ = -45.0;
 
   for (let i = 0; i < BUILDINGS_PER_SIDE; i++) {
     const gi = sideIndex * BUILDINGS_PER_SIDE + i;
 
     // Boyut varyasyonları
-    const w = W_MIN + _seed(gi, 1) * (W_MAX - W_MIN);
-    const h = H_MIN + _seed(gi, 2) * (H_MAX - H_MIN);
-    const d = D_MIN + _seed(gi, 3) * (D_MAX - D_MIN);
+    const w = 18.0 + _seed(gi, 1) * 12.0; // 18m - 30m genişlik
+    const h = 34.0 + _seed(gi, 2) * 50.0; // 34m - 84m yükseklik (görkemli silüet)
+    const d = 28.0 + _seed(gi, 3) * 10.0; // 28m - 38m derinlik
 
-    // Z yerleşimi (Ara sokak kavşak boşlukları ile)
-    let z = Z_START + i * Z_SPACING + (_seed(gi, 4) - 0.5) * 16.0;
-
-    // Ara sokak kavşak boşlukları (Alley gaps)
-    if (isRight) {
-      if (z >= 36 && z <= 56)  z += 24; // Sağ ara sokak boşluğu
-      if (z >= 190 && z <= 215) z += 26;
-    } else {
-      if (z >= 96 && z <= 120) z += 28; // Sol ara sokak boşluğu
+    // Ara sokak kavşak koridorları (i = 2, 7, 14'te 9 metrelik temiz ara sokak açıklığı)
+    const isAlley = (i === 2 || i === 7 || i === 14);
+    if (isAlley) {
+      currentZ += 9.0;
     }
 
-    // X merkezi (Kaldırım dış kenarından geriye doğru oturur, kaldırımı asla kapatmaz)
-    const baseOffset = isRight ? (-SIDEWALK_OUTER_X - w / 2 - 1.2) : (SIDEWALK_OUTER_X + w / 2 + 1.2);
-    const jitterX = (_seed(gi, 5) - 0.5) * 2.0;
-    const x = isRight ? (baseOffset - Math.abs(jitterX)) : (baseOffset + Math.abs(jitterX));
+    const z = currentZ + d / 2;
+    currentZ += d + 1.2; // Bitişik nizam, sıfır boşluk
+
+    // X merkezi: Ön cephesi tam olarak facadeLine hattına hizalanır
+    const x = isRight ? (facadeLine - w / 2) : (facadeLine + w / 2);
     const y = h / 2;
 
     _pos.set(x, y, z);
@@ -587,11 +686,11 @@ function _buildSide(sideIndex, sideName, mesh) {
 
     mesh.setMatrixAt(i, _m4);
 
-    // Renk varyasyonu (Koyu antrasit, gri-mavi, koyu kahve)
+    // Renk varyasyonu (Koyu antrasit, gri-mavi, koyu granit)
     const colVariant = _seed(gi, 6);
-    if (colVariant < 0.35)      _col.setHex(0x0e1118);
-    else if (colVariant < 0.70) _col.setHex(0x13151c);
-    else                        _col.setHex(0x18171f);
+    if (colVariant < 0.35)      _col.setHex(0x0c0f16);
+    else if (colVariant < 0.70) _col.setHex(0x12141c);
+    else                        _col.setHex(0x16171f);
 
     mesh.setColorAt(i, _col);
   }
@@ -615,17 +714,17 @@ export function updateWorld(delta) {
     }
   }
 
-  // 2. Binaların Z Akışı (Caddenin geriye doğru akış hissi)
+  // 2. Binaların Z Akışı (Caddenin geriye doğru kesintisiz akışı)
   if (_meshLeft) {
     _meshLeft.position.z -= driftZ;
-    if (_meshLeft.position.z < -1000.0) {
-      _meshLeft.position.z = 0.0;
+    if (_meshLeft.position.z < -36.0) {
+      _meshLeft.position.z += 36.0;
     }
   }
   if (_meshRight) {
     _meshRight.position.z -= driftZ;
-    if (_meshRight.position.z < -1000.0) {
-      _meshRight.position.z = 0.0;
+    if (_meshRight.position.z < -36.0) {
+      _meshRight.position.z += 36.0;
     }
   }
 
@@ -670,9 +769,11 @@ export function updateWorld(delta) {
 
 /**
  * Şimşek anında binaların pencerelerinin emissive parlaklığını günceller.
+ * 0.28 -> 1.60: Bloom eşiğini (0.78) aşarak canlı optik parlama verir,
+ * ancak pencerelerin beyazlaşıp "yanmasını" (blowout) önler.
  */
 export function setBuildingLightningFactor(factor) {
-  const intensity = 0.30 + factor * 1.70; // 0.30 -> 2.00
+  const intensity = 0.28 + factor * 1.32; // 0.28 -> 1.60
   if (_meshLeft  && _meshLeft.material)  _meshLeft.material.emissiveIntensity = intensity;
   if (_meshRight && _meshRight.material) _meshRight.material.emissiveIntensity = intensity;
 }

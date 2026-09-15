@@ -46,9 +46,9 @@ const BULB_WORLD_Y    = POLE_BASE_Y + BULB_REL_Y; // ~5.25 m
 
 // PointLight fiziksel parametreleri
 const LIGHT_COLOR     = 0xffaa44; // Sıcak amber / sodyum sarısı gece tonu
-const TARGET_INTENSITY= 2.20;     // Canlı sinematik sokak ışığı
-const LIGHT_DISTANCE  = 40.0;     // Işığın etki mesafesi (m)
-const LIGHT_DECAY     = 2.0;      // Fiziksel sönümleme (inverse square law)
+const TARGET_INTENSITY= 8.50;     // Gerçekçi zemin aydınlatması sağlayan canlı sokak ışığı
+const LIGHT_DISTANCE  = 42.0;     // Işığın etki mesafesi (m)
+const LIGHT_DECAY     = 1.25;     // Doğal yumuşak sönümleme (zemin ve kaldırımı besler)
 
 // ══════════════════════════════════════════════════════════════════════════════
 // LAMP DATA DEFINITIONS (16 Lamba Veri Havuzu)
@@ -119,11 +119,11 @@ let _lightningFactor  = 0.0;
 let _stochasticTimer  = 4.5 + Math.random() * 2.0; // İlk doğal şimşek ~5 saniyede çakar
 
 // Zero-Allocation Renk Nesneleri (Her frame new Color() çağırmak KESİNLİKLE YASAKTIR)
-const _colBgBase    = new THREE.Color(0x05050a); // Koyu gece arkaplanı
+const _colBgBase    = new THREE.Color(0x030306); // Derin noir gece arkaplanı
 const _colBgFlash   = new THREE.Color(0x4a6a94); // Şimşek fırtına mavisi/beyazı
 const _colCurrent   = new THREE.Color();
 
-const _colSkyBase   = new THREE.Color(0x0a0a20);
+const _colSkyBase   = new THREE.Color(0x1a2238);
 const _colSkyFlash  = new THREE.Color(0x6a8ab4);
 
 const _colMoonBase  = new THREE.Color(0x1a1a2e);
@@ -354,28 +354,36 @@ export async function initLighting(scene, group, config) {
 
   // ── 1. HemisphereLight ───────────────────────────────────────────────────
   _hemiLight = new THREE.HemisphereLight(
-    0x0a0a20, // Soğuk gece gökyüzü
-    0x050510, // Koyu zemin yansıması
-    0.40
+    0x1a2238, // Soğuk gece gökyüzü dolgusu
+    0x0c101a, // Koyu zemin yansıması
+    0.32
   );
   _hemiLight.name = 'hemisphereLight';
   lightsGroup.add(_hemiLight);
 
   // ── 2. AmbientLight ───────────────────────────────────────────────────────
   _ambientLight = new THREE.AmbientLight(
-    0x141828, // Gece mavisi dolgu
-    0.65
+    0x141a2c, // Gece mavisi dolgu (film noir derinliği & detay okunabilirliği)
+    0.38
   );
   _ambientLight.name = 'ambientLight';
   lightsGroup.add(_ambientLight);
 
   // ── 2b. Viewmodel & Street Forward Rim Light ──────────────────────────────
-  const walkerFill = new THREE.DirectionalLight(0xaad0ff, 0.85);
+  const walkerFill = new THREE.DirectionalLight(0x7090b8, 0.40);
   walkerFill.name = 'streetRimLight';
   walkerFill.position.set(2.2, 3.5, -2.0);
   walkerFill.target.position.set(2.2, 1.2, 20.0);
   lightsGroup.add(walkerFill);
   lightsGroup.add(walkerFill.target);
+
+  // ── 2c. Sidewalk & Curb Soft Atmospheric Fill ────────────────────────────
+  const sidewalkFill = new THREE.DirectionalLight(0x405575, 0.50);
+  sidewalkFill.name = 'sidewalkFillLight';
+  sidewalkFill.position.set(-4.5, 6.0, -5.0);
+  sidewalkFill.target.position.set(-4.5, 0.0, 30.0);
+  lightsGroup.add(sidewalkFill);
+  lightsGroup.add(sidewalkFill.target);
 
   // ── 3. DirectionalLight (Ay Işığı & Şimşek Flaş Kaynağı) ─────────────────
   _moonLight = new THREE.DirectionalLight(0x1a1a2e, 0.25);
@@ -477,14 +485,14 @@ export function updateLighting(delta, cameraPos) {
     if (_sceneRef.fog && _sceneRef.fog.color) _sceneRef.fog.color.copy(_colCurrent);
   }
 
-  // AmbientLight: 0.40 -> 3.00
+  // AmbientLight: 0.38 -> 2.60
   if (_ambientLight) {
-    _ambientLight.intensity = 0.40 + _lightningFactor * 2.60;
+    _ambientLight.intensity = 0.38 + _lightningFactor * 2.22;
   }
 
-  // HemisphereLight: 0.40 -> 1.90
+  // HemisphereLight: 0.32 -> 1.70
   if (_hemiLight) {
-    _hemiLight.intensity = 0.40 + _lightningFactor * 1.50;
+    _hemiLight.intensity = 0.32 + _lightningFactor * 1.38;
     _hemiLight.color.copy(_colSkyBase).lerp(_colSkyFlash, _lightningFactor);
   }
 

@@ -24,15 +24,19 @@ export const ROAD_LENGTH     = 3000;  // Z yönünde uzunluk (-50 .. 2950 m)
 export const CURB_WIDTH      = 0.35;  // Bordür taşı genişliği
 export const CURB_HEIGHT     = 0.26;  // Asfalttan 26 cm, kaldırımdan 12 cm yukarı taşan taş bordür
 export const SIDEWALK_THICK  = 0.14;  // Kaldırım kalınlığı (Y = 0.14m yüzey)
-export const SIDEWALK_WIDTH  = 3.20;  // Kaldırım genişliği
+export const SIDEWALK_WIDTH  = 10.0;  // Binaların ve ara sokakların altına kadar uzanan kesintisiz ferah kaldırım
 
-// Sağ Kaldırım (Yürüdüğümüz taraf: -3.80 m) ve Karşı Sol Kaldırım (+8.05 m)
-export const RIGHT_CURB_X    = -2.72; // Sağ bordür merkezi (Yol ve yürüdüğümüz kaldırım sınırı)
-export const RIGHT_SW_X      = -4.40; // Sağ kaldırım merkezi (-3.80 m güvenle bu kaldırımın ortasındadır)
-export const SIDEWALK_OUTER_X=  6.10; // Binaların ve dükkanların başladığı hat
-
+// Sağ Kaldırım (Yürüdüğümüz taraf: -4.50 m): Bordür -2.72m, kaldırım -2.80 ile -12.80m arası (bina hattının 5m altına uzanır)
+export const RIGHT_CURB_X    = -2.72; // Sağ bordür merkezi
+export const RIGHT_SW_X      = -7.80; // Sağ kaldırım merkezi (Kamera baseX = -4.50 ferah şekilde yürür)
+// Sol Kaldırım (Karşı taraf): Bordür +6.37m, kaldırım +6.45 ile +16.45m arası
 export const LEFT_CURB_X     =  6.37; // Karşı sol bordür merkezi
-export const LEFT_SW_X       =  8.05; // Karşı sol kaldırım merkezi
+export const LEFT_SW_X       = 11.45; // Karşı sol kaldırım merkezi
+export const SIDEWALK_OUTER_X=  7.50; // Geriye dönük uyumluluk
+
+// Bina ön cephe hatları (Kaldırımın dış kenarından ferah pay bırakılarak):
+export const BUILDING_LINE_RIGHT = -7.80; // Sağ bina cephe hattı
+export const BUILDING_LINE_LEFT  = 11.40; // Sol bina cephe hattı
 
 const Z_CENTER               = 1450;  // Geometri merkezi
 
@@ -44,6 +48,7 @@ let _group       = null;
 let _sceneRef    = null;
 let _reflector   = null;
 let _puddleTex   = null;
+let _sidewalkTex = null;
 let _dashMesh    = null;
 let _zebraGroup  = null;
 let _zebraZ      = 14.0;
@@ -111,6 +116,85 @@ function _createPuddleTexture() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ISLAK GRANİT KALDIRIM TAŞ DÖŞEMESİ DOKUSU (Wet Granite Flagstone Pavers)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function _createSidewalkTexture(maxAniso = 16) {
+  if (typeof document === 'undefined') return null;
+
+  const width  = 512;
+  const height = 1024;
+  const canvas = document.createElement('canvas');
+  canvas.width  = width;
+  canvas.height = height;
+  const ctx     = canvas.getContext('2d');
+
+  // Baz zemin derz rengi (koyu antrasit harç)
+  ctx.fillStyle = '#141822';
+  ctx.fillRect(0, 0, width, height);
+
+  // Şaşırtmalı granit kaldırım taşları (Staggered running bond flagstones)
+  const cols = 4;
+  const rows = 16;
+  const slabW = width / cols;
+  const slabH = height / rows;
+
+  for (let r = 0; r < rows; r++) {
+    const xOffset = (r % 2 === 1) ? (slabW * 0.5) : 0.0;
+    for (let c = -1; c <= cols; c++) {
+      const sx = c * slabW + xOffset;
+      const sy = r * slabH;
+
+      // Taş tonu mikro varyasyonları (koyu arduvaz, ıslak granit, çelik mavisi)
+      const n = Math.sin(r * 11.7 + c * 37.3) * 0.5 + 0.5;
+      let stoneColor;
+      if (n < 0.25)      stoneColor = '#323a4b';
+      else if (n < 0.50) stoneColor = '#2b3242';
+      else if (n < 0.75) stoneColor = '#3a4456';
+      else               stoneColor = '#363f50';
+
+      ctx.fillStyle = stoneColor;
+      // 3px derz boşluğu bırakarak döşeme taşını çiz
+      ctx.fillRect(sx + 3, sy + 3, slabW - 6, slabH - 6);
+
+      // Taş pahı ve ışık kırılımı (üst & sol kenar aydınlık, alt & sağ gölge)
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+      ctx.fillRect(sx + 3, sy + 3, slabW - 6, 2);
+      ctx.fillRect(sx + 3, sy + 3, 2, slabH - 6);
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.fillRect(sx + 3, sy + slabH - 5, slabW - 6, 2);
+      ctx.fillRect(sx + slabW - 5, sy + 3, 2, slabH - 6);
+
+      // Islak su birikintisi cilası (Puddle sheen)
+      const puddleN = Math.cos(r * 9.1 + c * 15.3) * 0.5 + 0.5;
+      if (puddleN > 0.55) {
+        ctx.fillStyle = 'rgba(205, 230, 255, 0.18)';
+        ctx.fillRect(sx + 6, sy + 6, slabW - 12, slabH - 12);
+      }
+    }
+  }
+
+  // Yatay ana derz çizgileri
+  ctx.fillStyle = '#0e1118';
+  for (let r = 0; r <= rows; r++) {
+    ctx.fillRect(0, r * slabH - 1, width, 2);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  // 10m genişlik x 3000m uzunluk caddede gerçekçi oranlı taş döşemesi
+  texture.repeat.set(4, 300);
+  texture.anisotropy = maxAniso;
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // CUSTOM REFLECTOR SHADER
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -155,7 +239,14 @@ const WetAsphaltReflectorShader = {
       vec4 projUv = vUv;
       projUv.xy += distortion * projUv.w;
 
-      vec4 reflection = texture2DProj( tDiffuse, projUv );
+      vec4 reflection = vec4( color, 1.0 );
+      if ( projUv.w > 0.0001 ) {
+        vec2 projCoord = projUv.xy / projUv.w;
+        // Ekran koordinatları sınırlarında güvenli örnekleme (kenar sızmalarını ve çarpık taşmaları önler)
+        if ( projCoord.x >= 0.0 && projCoord.x <= 1.0 && projCoord.y >= 0.0 && projCoord.y <= 1.0 ) {
+          reflection = texture2D( tDiffuse, projCoord );
+        }
+      }
 
       // Koyu asfalt ile hafif specular yansıma
       float wetness = uBlendFactor * (0.30 + 0.70 * puddle.r);
@@ -175,11 +266,15 @@ const WetAsphaltReflectorShader = {
 // PUBLIC API
 // ══════════════════════════════════════════════════════════════════════════════
 
-export async function initGround(scene, group, config) {
+export async function initGround(scene, group, config, renderer) {
   _group    = group;
   _sceneRef = scene;
 
-  _initMaterials();
+  const maxAniso = (renderer && renderer.capabilities && typeof renderer.capabilities.getMaxAnisotropy === 'function')
+    ? Math.min(16, renderer.capabilities.getMaxAnisotropy())
+    : 16;
+
+  _initMaterials(maxAniso);
   _buildRoad();
   _buildRoadMarkings();
   _buildSidewalks();
@@ -221,11 +316,38 @@ export function updateGround(delta) {
   }
 }
 
+/**
+ * Reflector Render Target Çözünürlüğü Hesaplayıcı.
+ * Kamera en/boy oranıyla (aspect ratio) kusursuz senkronize kalır,
+ * 4K ve yüksek DPI (Retina) ekranlarda VRAM aşımını önlemek için
+ * maksimum 1536px güvenli üst tavan uygular.
+ */
+function _calcReflectorDimensions(width, height) {
+  const aspect = (width > 0 && height > 0) ? (width / height) : (16 / 9);
+  const maxDim = 1536;
+
+  let targetW = width * 0.5;
+  let targetH = height * 0.5;
+
+  if (targetW > maxDim || targetH > maxDim) {
+    if (aspect >= 1.0) {
+      targetW = maxDim;
+      targetH = targetW / aspect;
+    } else {
+      targetH = maxDim;
+      targetW = targetH * aspect;
+    }
+  }
+
+  const rw = Math.max(256, Math.round(targetW));
+  const rh = Math.max(128, Math.round(targetH));
+  return { rw, rh };
+}
+
 export function onResizeGround(width, height) {
   if (_reflector && typeof _reflector.getRenderTarget === 'function') {
-    const w = Math.min(1024, Math.floor(width * 0.5));
-    const h = Math.min(512,  Math.floor(height * 0.5));
-    _reflector.getRenderTarget().setSize(w, h);
+    const { rw, rh } = _calcReflectorDimensions(width, height);
+    _reflector.getRenderTarget().setSize(rw, rh);
   }
 }
 
@@ -233,8 +355,9 @@ export function onResizeGround(width, height) {
 // PRIVATE BUILDERS
 // ══════════════════════════════════════════════════════════════════════════════
 
-function _initMaterials() {
-  _puddleTex = _createPuddleTexture();
+function _initMaterials(maxAniso = 16) {
+  _puddleTex   = _createPuddleTexture();
+  _sidewalkTex = _createSidewalkTexture(maxAniso);
 
   // Koyu ıslak zift asfaltı — derin siyah kontrast
   _matAsphalt = new THREE.MeshStandardMaterial({
@@ -243,18 +366,19 @@ function _initMaterials() {
     metalness: 0.28,
   });
 
-  // Kaldırımlar: Belirgin ıslak taş döşeme
+  // Kaldırımlar: Dokulu ıslak granit taş döşeme (Pavers) — 0xffffff ile map dokusu tam zenginliğiyle yansır
   _matSidewalk = new THREE.MeshStandardMaterial({
-    color:     0x1c1f28,
-    roughness: 0.60,
-    metalness: 0.08,
+    color:     0xffffff,
+    map:       _sidewalkTex,
+    roughness: 0.32,
+    metalness: 0.14,
   });
 
-  // Bordürler: Yükseltilmiş ıslak granit taş — asfalttan belirgin yüksek kontrast
+  // Bordürler: Yükseltilmiş ıslak granit taş — asfalttan ve kaldırımdan net ayrılan kontrast
   _matCurb = new THREE.MeshStandardMaterial({
-    color:     0x3a3f50,
-    roughness: 0.30,
-    metalness: 0.25,
+    color:     0x68748c,
+    roughness: 0.25,
+    metalness: 0.20,
   });
 
   // Parlak sarı kesik orta şerit — suyun altından jilet gibi parıldasın
@@ -289,8 +413,7 @@ function _buildRoad() {
 
   // 2. Islak Asfalt Planar Reflector (Y = 0.001 m)
   if (typeof window !== 'undefined') {
-    const rw = Math.min(1024, Math.floor(window.innerWidth * 0.5));
-    const rh = Math.min(512,  Math.floor(window.innerHeight * 0.5));
+    const { rw, rh } = _calcReflectorDimensions(window.innerWidth, window.innerHeight);
 
     WetAsphaltReflectorShader.uniforms.tPuddle.value = _puddleTex;
 
@@ -306,6 +429,19 @@ function _buildRoad() {
     _reflector.name = 'road_wet_reflector';
     _reflector.rotation.x = -Math.PI / 2;
     _reflector.position.set(ROAD_CENTER_X, 0.001, Z_CENTER);
+
+    // Birinci şahıs şemsiye görünüm modelinin asfalta ters yansımasını/çakışmasını önleyen filtre
+    const origOnBeforeRender = _reflector.onBeforeRender;
+    _reflector.onBeforeRender = function (renderer, scene, camera) {
+      const fpsUmb = camera.getObjectByName('fpsUmbrellaRoot');
+      const prevVis = fpsUmb ? fpsUmb.visible : true;
+      if (fpsUmb) fpsUmb.visible = false;
+
+      origOnBeforeRender.call(_reflector, renderer, scene, camera);
+
+      if (fpsUmb) fpsUmb.visible = prevVis;
+    };
+
     _group.add(_reflector);
   }
 }

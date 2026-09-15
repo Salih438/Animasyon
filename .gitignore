@@ -1,0 +1,7 @@
+# Scratch & test scripts / temporary artifacts
+scratch/
+
+# OS & Environment files
+.DS_Store
+Thumbs.db
+*.log

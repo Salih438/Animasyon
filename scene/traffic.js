@@ -20,6 +20,7 @@
  */
 
 import * as THREE from 'three';
+import { spawnSplash } from './rain.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CONFIGURATION CONSTANTS
@@ -458,6 +459,13 @@ export function updateTraffic(delta) {
 
     // 0 tahsis: sadece ilkel float konumu atanır
     c.group.position.z = c.z;
+
+    // ── Tekerlek Su Sıçratması (Wet Asphalt Tire Spray) ──────────────────────
+    if (c.z > -8.0 && c.z < 35.0 && Math.random() < 0.22) {
+      const rearZ = c.isIncoming ? (c.z + 1.8) : (c.z - 1.8);
+      const tireX = (Math.random() < 0.5) ? (c.laneX - 0.72) : (c.laneX + 0.72);
+      spawnSplash(tireX, 0.012, rearZ, 1.25, 0.16);
+    }
   }
 
   // ── Volumetrik Far Huzmelerini Güncelle (En yakın 2 karşı araç) ────────────
