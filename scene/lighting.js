@@ -23,9 +23,9 @@
  */
 
 import * as THREE from 'three';
-import { setBuildingLightningFactor } from './world.js';
+import { emitLightning }            from './events.js';
 import { setRainLightningFactor }     from './rain.js';
-import { RIGHT_CURB_X, LEFT_CURB_X }  from './ground.js';
+import { RIGHT_CURB_X, LEFT_CURB_X, WALK_SPEED }  from './ground.js';
 import { playThunder }                from './audio.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -37,15 +37,14 @@ export const LAMPS_PER_SIDE  = 8;
 export const LIGHT_POOL_SIZE = 4; // GPU forward rendering için sabit 4 PointLight
 
 // Yerleşim koordinatları (Kaldırım bordür kenarlarına oturan gerçekçi 3D sokak lambaları)
-const RIGHT_POLE_X    = -2.75; // Sağ bordür üzerinde (Kameranın sol kenarında, cadde ile yürüdüğümüz kaldırım sınırı)
-const LEFT_POLE_X     =  6.35; // Karşı sol bordür üzerinde
+const RIGHT_POLE_X    = RIGHT_CURB_X; // Sağ bordür üzerinde
+const LEFT_POLE_X     = LEFT_CURB_X;  // Karşı sol bordür üzerinde
 const LAMP_ARM_LEN    =  1.40; // Üst kolun yola doğru yatay uzantısı (m)
 const POLE_BASE_Y     =  0.00; // Asfalt/bordür taban kotu
 const BULB_REL_Y      =  5.25; // Ampulün direk tabanına göre göreli yüksekliği
 const BULB_WORLD_Y    = POLE_BASE_Y + BULB_REL_Y; // ~5.25 m
 
 // PointLight fiziksel parametreleri
-const LIGHT_COLOR     = 0xffaa44; // Sıcak amber / sodyum sarısı gece tonu
 const TARGET_INTENSITY= 8.50;     // Gerçekçi zemin aydınlatması sağlayan canlı sokak ışığı
 const LIGHT_DISTANCE  = 42.0;     // Işığın etki mesafesi (m)
 const LIGHT_DECAY     = 1.25;     // Doğal yumuşak sönümleme (zemin ve kaldırımı besler)
@@ -57,14 +56,18 @@ const LIGHT_DECAY     = 1.25;     // Doğal yumuşak sönümleme (zemin ve kald�
 const _lampData = new Array(LAMP_COUNT);
 
 (function _initLampData() {
-  // Düzenli aralıklarla sağ ve sol lamba çiftleri (Kameranın hemen önünden Z=2'den başlar!)
-  const zPositions = [2, 16, 32, 50, 72, 100, 135, 180];
+  // Düzenli aralıklarla sağ ve sol lamba çiftleri (Kameranın önünü tıkamamak için Z=16'dan başlar)
+  const zPositions = [16, 42, 72, 106, 144, 186, 232, 282];
+  const colors = [0xffaa22, 0xff9911, 0xffbb44, 0xff8800];
   for (let i = 0; i < LAMPS_PER_SIDE; i++) {
     const z = zPositions[i];
+    const cIdxR = Math.floor(Math.random() * colors.length);
+    const cIdxL = Math.floor(Math.random() * colors.length);
     // Sağ lamba (i = 0..7) — kolu yola doğru (+X) uzanır
     _lampData[i] = {
       id: i,
       side: 'right',
+      color: colors[cIdxR],
       poleX: RIGHT_POLE_X,
       poleY: POLE_BASE_Y,
       z: z,
@@ -78,6 +81,7 @@ const _lampData = new Array(LAMP_COUNT);
     _lampData[id] = {
       id: id,
       side: 'left',
+      color: colors[cIdxL],
       poleX: LEFT_POLE_X,
       poleY: POLE_BASE_Y,
       z: z,
@@ -116,6 +120,7 @@ const _closestDists   = new Float32Array(LIGHT_POOL_SIZE);
 let _lightningActive  = false;
 let _lightningTime    = 0.0;
 let _lightningFactor  = 0.0;
+let _lastEmittedLightningFactor = -1.0;
 let _stochasticTimer  = 4.5 + Math.random() * 2.0; // İlk doğal şimşek ~5 saniyede çakar
 
 // Zero-Allocation Renk Nesneleri (Her frame new Color() çağırmak KESİNLİKLE YASAKTIR)
@@ -224,12 +229,41 @@ function _buildLampposts(parentGroup) {
   });
 
   const matBulb = new THREE.MeshStandardMaterial({
-    color:             0xffe088,
-    emissive:          new THREE.Color(0xffaa22),
+    color:             0xffffff, // Taban rengi
+    emissive:          new THREE.Color(1.0, 1.0, 1.0),
     emissiveIntensity: 3.8, // Parlak sıcak sarı ampul (Bloom parlaması)
     roughness:         0.15,
     metalness:         0.10,
   });
+  
+  matBulb.onBeforeCompile = (shader) => {
+    shader.vertexShader = `
+      #ifdef USE_INSTANCING_COLOR
+        varying vec3 vInstColor;
+      #endif
+      ${shader.vertexShader}
+    `.replace(
+      '#include <color_vertex>',
+      `#include <color_vertex>
+       #ifdef USE_INSTANCING_COLOR
+         vInstColor = instanceColor;
+       #endif
+      `
+    );
+    shader.fragmentShader = `
+      #ifdef USE_INSTANCING_COLOR
+        varying vec3 vInstColor;
+      #endif
+      ${shader.fragmentShader}
+    `.replace(
+      '#include <emissivemap_fragment>',
+      `#include <emissivemap_fragment>
+       #ifdef USE_INSTANCING_COLOR
+         totalEmissiveRadiance *= vInstColor;
+       #endif
+      `
+    );
+  };
 
   const poleGeo = _createPoleGeometry();
   const bulbGeo = new THREE.SphereGeometry(0.28, 16, 12);
@@ -243,6 +277,7 @@ function _buildLampposts(parentGroup) {
   _lampBulbMesh = new THREE.InstancedMesh(bulbGeo, matBulb, LAMP_COUNT);
   _lampBulbMesh.name = 'lampposts_bulbs';
 
+  const _colHelper = new THREE.Color();
   for (let i = 0; i < LAMP_COUNT; i++) {
     const l = _lampData[i];
     _pos.set(l.poleX, l.poleY, l.z);
@@ -256,10 +291,14 @@ function _buildLampposts(parentGroup) {
 
     _lampPoleMesh.setMatrixAt(i, _m4);
     _lampBulbMesh.setMatrixAt(i, _m4);
+    
+    _colHelper.setHex(l.color);
+    _lampBulbMesh.setColorAt(i, _colHelper);
   }
 
   _lampPoleMesh.instanceMatrix.needsUpdate = true;
   _lampBulbMesh.instanceMatrix.needsUpdate = true;
+  if (_lampBulbMesh.instanceColor) _lampBulbMesh.instanceColor.needsUpdate = true;
 
   _lampPoleMesh.computeBoundingSphere();
   _lampBulbMesh.computeBoundingSphere();
@@ -267,56 +306,83 @@ function _buildLampposts(parentGroup) {
   parentGroup.add(_lampPoleMesh, _lampBulbMesh);
 }
 
-function _createLampBeamTexture() {
-  if (typeof document === 'undefined') return null;
+/**
+ * Volumetrik Işık Külahı Gölgelendiricisi (VolumetricLightShader)
+ *
+ * Tepe noktasından (ampul merkezi) tabana doğru pürüzsüz azalan (smoothstep falloff)
+ * ve kamera açısına göre koni kenarlarını yumuşatan (edge feathering) yarı saydam ShaderMaterial.
+ */
+const VolumetricLightShader = {
+  name: 'VolumetricLightShader',
+  uniforms: {
+    uHeight:    { value: BULB_REL_Y },
+    uColor:     { value: new THREE.Color(0xffb455) },
+    uIntensity: { value: 0.34 },
+  },
+  vertexShader: `
+    varying vec3 vViewPosition;
+    varying vec3 vNormal;
+    varying float vProgress;
+    uniform float uHeight;
 
-  const w = 128, h = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width  = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
+    void main() {
+      // position.y tepe noktasında (apex) 0.0, tabanda -uHeight
+      vProgress = clamp(-position.y / uHeight, 0.0, 1.0);
+      
+      vNormal = normalize(normalMatrix * normal);
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      vViewPosition = -mvPosition.xyz;
+      
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vViewPosition;
+    varying vec3 vNormal;
+    varying float vProgress;
 
-  // Saydam arka plan
-  ctx.clearRect(0, 0, w, h);
+    uniform vec3 uColor;
+    uniform float uIntensity;
 
-  // Tepe noktasından (ampul) aşağıya doğru yumuşak üstel sönüm
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0.00, 'rgba(255, 205, 120, 0.90)');
-  grad.addColorStop(0.08, 'rgba(255, 185,  95, 0.65)');
-  grad.addColorStop(0.35, 'rgba(255, 160,  65, 0.28)');
-  grad.addColorStop(0.70, 'rgba(255, 140,  45, 0.08)');
-  grad.addColorStop(1.00, 'rgba(255, 120,  30, 0.00)');
+    void main() {
+      // 1. Tepe noktasından tabana doğru pürüzsüz azalan dikey sönüm (smoothstep falloff)
+      // vProgress: 0.0 (ampul armatürü merkezi) -> 1.0 (zemin/asfalt)
+      float verticalFade = smoothstep(1.0, 0.06, vProgress);
+      // Armatür yuvası çıkışını yumuşatan mikro başlangıç
+      float apexSoft = smoothstep(0.0, 0.035, vProgress);
+      float dikeySonum = verticalFade * apexSoft;
 
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, w, h);
+      // 2. Kamera açısına göre kenarları yumuşatan faktör (Fresnel / Rim feathering)
+      // Koni silüetinin sert/opak üçgen hatlarını bakış açısına göre pürüzsüzleştirir
+      vec3 viewDir = normalize(vViewPosition);
+      vec3 norm = normalize(vNormal);
+      float rim = abs(dot(norm, viewDir));
+      float edgeFeather = smoothstep(0.0, 0.48, rim);
 
-  // Yan kenar yumuşatması (sol ve sağ kenarlara doğru dikişsiz geçiş)
-  const edgeGrad = ctx.createLinearGradient(0, 0, w, 0);
-  edgeGrad.addColorStop(0.0, 'rgba(0, 0, 0, 1.0)');
-  edgeGrad.addColorStop(0.3, 'rgba(0, 0, 0, 0.0)');
-  edgeGrad.addColorStop(0.7, 'rgba(0, 0, 0, 0.0)');
-  edgeGrad.addColorStop(1.0, 'rgba(0, 0, 0, 1.0)');
+      float alpha = dikeySonum * edgeFeather * uIntensity;
+      if (alpha < 0.001) discard;
 
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.fillStyle = edgeGrad;
-  ctx.fillRect(0, 0, w, h);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  return texture;
-}
+      gl_FragColor = vec4(uColor * alpha, alpha);
+    }
+  `
+};
 
 function _buildVolumetricBeams(parentGroup) {
-  // Açık tabanlı dikey koni geometrisi (tepe ampulde Y=0, taban asfalta doğru Y=-5.25m)
-  const beamGeo = new THREE.ConeGeometry(2.3, BULB_REL_Y, 16, 1, true);
+  // Açık tabanlı dikey koni geometrisi (tepe apex Y=0, taban asfalta doğru Y=-5.25m)
+  // 24 segment ile yuvarlak ve pürüzsüz silüet
+  const beamGeo = new THREE.ConeGeometry(2.35, BULB_REL_Y, 24, 1, true);
+  // Geometriyi translate ederek tepe noktasını (apex) tam (0,0,0) merkez koordinatına oturt
   beamGeo.translate(0, -BULB_REL_Y / 2, 0);
 
-  const matBeam = new THREE.MeshBasicMaterial({
-    map:         _createLampBeamTexture(),
-    color:       0xffb455,
+  const matBeam = new THREE.ShaderMaterial({
+    vertexShader:   VolumetricLightShader.vertexShader,
+    fragmentShader: VolumetricLightShader.fragmentShader,
+    uniforms: {
+      uHeight:    { value: BULB_REL_Y },
+      uColor:     { value: new THREE.Color(0xffb455) },
+      uIntensity: { value: 0.34 },
+    },
     transparent: true,
-    opacity:     0.32,
     blending:    THREE.AdditiveBlending,
     depthWrite:  false,
     side:        THREE.DoubleSide,
@@ -327,10 +393,13 @@ function _buildVolumetricBeams(parentGroup) {
   _lampBeamMesh.frustumCulled = false;
 
   const zeroM4 = new THREE.Matrix4().makeScale(0, 0, 0);
+  const tempCol = new THREE.Color(0xffffff);
   for (let k = 0; k < LIGHT_POOL_SIZE; k++) {
     _lampBeamMesh.setMatrixAt(k, zeroM4);
+    _lampBeamMesh.setColorAt(k, tempCol);
   }
   _lampBeamMesh.instanceMatrix.needsUpdate = true;
+  _lampBeamMesh.instanceColor.needsUpdate = true;
 
   parentGroup.add(_lampBeamMesh);
 }
@@ -413,7 +482,7 @@ export async function initLighting(scene, group, config) {
 
   // ── 5. Dinamik 4-PointLight Havuzunu Başlat ──────────────────────────────
   for (let k = 0; k < LIGHT_POOL_SIZE; k++) {
-    const pl = new THREE.PointLight(LIGHT_COLOR, 0.0, LIGHT_DISTANCE, LIGHT_DECAY);
+    const pl = new THREE.PointLight(0xffffff, 0.0, LIGHT_DISTANCE, LIGHT_DECAY);
     pl.name = `streetPointLight_${k}`;
     pl.castShadow = false;
     lightsGroup.add(pl);
@@ -502,22 +571,26 @@ export function updateLighting(delta, cameraPos) {
     _moonLight.color.copy(_colMoonBase).lerp(_colMoonFlash, _lightningFactor);
   }
 
-  // Bina Pencereleri Emissive Spike Senkronizasyonu
-  setBuildingLightningFactor(_lightningFactor);
+  // Faz 9: Minimal Lightning Domain Event Broadcast (Decoupled Producer)
+  if (_lightningFactor !== _lastEmittedLightningFactor || _lightningActive) {
+    emitLightning(_lightningFactor);
+    _lastEmittedLightningFactor = _lightningFactor;
+  }
 
   // Yağmur Parçacıkları Parlaklık Senkronizasyonu
   setRainLightningFactor(_lightningFactor);
 
   // ── 2c. Sokak Lambalarının Z Akışı (Sokak lambaları başımızın üstünden arkaya doğru kaysın) ──
-  const driftZ = 2.8 * dt;
+  // driftZ: WALK_SPEED (ground.js) × dt — world.js ile senkron, tek kaynak
+  const driftZ = WALK_SPEED * dt;
   for (let j = 0; j < LAMP_COUNT; j++) {
     const l = _lampData[j];
     l.z -= driftZ;
     l.bulbZ = l.z;
 
-    // Kameranın arkasına geçtiğinde (-16 m) ileride yeniden doğ (+180 m)
-    if (l.z < -16.0) {
-      l.z += 196.0;
+    // Kameranın arkasına geçtiğinde (-20 m) ileride yeniden doğ (+288 m)
+    if (l.z < -20.0) {
+      l.z += 288.0;
       l.bulbZ = l.z;
     }
 
@@ -574,6 +647,7 @@ export function updateLighting(delta, cameraPos) {
 
       if (_poolTargetLamps[k] !== lampId) {
         pl.position.set(lamp.bulbX, lamp.bulbY, lamp.bulbZ);
+        pl.color.setHex(lamp.color);
         _poolTargetLamps[k] = lampId;
       }
 
@@ -598,6 +672,9 @@ export function updateLighting(delta, cameraPos) {
         _quat.identity();
         _m4.compose(_pos, _quat, _scale);
         _lampBeamMesh.setMatrixAt(k, _m4);
+        
+        _colCurrent.setHex(lamp.color);
+        _lampBeamMesh.setColorAt(k, _colCurrent);
       } else {
         _scale.set(0, 0, 0);
         _pos.set(0, -100, 0);
@@ -609,6 +686,7 @@ export function updateLighting(delta, cameraPos) {
 
   if (_lampBeamMesh) {
     _lampBeamMesh.instanceMatrix.needsUpdate = true;
+    if (_lampBeamMesh.instanceColor) _lampBeamMesh.instanceColor.needsUpdate = true;
   }
 }
 

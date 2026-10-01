@@ -15,7 +15,7 @@
 
 import * as THREE from 'three';
 import { getTrafficData } from './traffic.js';
-import { getPedestrianData } from './world.js';
+import { getPedestrianData } from './world/index.js';
 
 const TOTAL_SHADOW_INSTANCES = 24;
 
@@ -88,6 +88,7 @@ export async function initShadows(scene, parentGroup) {
   _shadowMesh = new THREE.InstancedMesh(planeGeo, shadowMat, TOTAL_SHADOW_INSTANCES);
   _shadowMesh.name = 'city_contact_shadows';
   _shadowMesh.frustumCulled = false;
+  _shadowMesh.renderOrder = 2; // Zemin ve kaldırımdan sonra, yarı saydam nesnelerden önce çizilir
 
   const zeroM4 = new THREE.Matrix4().makeScale(0, 0, 0);
   for (let i = 0; i < TOTAL_SHADOW_INSTANCES; i++) {
@@ -143,8 +144,10 @@ export function updateShadows(cameraPos) {
     const instIdx = 12 + p;
     if (p < pedCount) {
       const ped = pedestrians[p];
-      // Kaldırım üstü seviyesi (Y = 0.142 m)
-      _pos.set(ped.x, 0.142, ped.z);
+      // Kaldırım üstü temas kotu (Y = 0.142 m) veya asfalt temas kotu (Y = 0.015 m)
+      const isSidewalk = (ped.x < -2.55 || ped.x > 6.20);
+      const contactY = isSidewalk ? 0.142 : 0.015;
+      _pos.set(ped.x, contactY, ped.z);
       // Dairesel yumuşak temas gölgesi (0.95m x 0.95m)
       _scale.set(0.95, 1.0, 0.95);
       _m4.compose(_pos, _quat, _scale);

@@ -39,17 +39,17 @@ let _active       = false;
 // ─── Optik Ayar Parametreleri ────────────────────────────────────────────────
 export const POST_CONFIG = Object.freeze({
   bloom: {
-    threshold: 0.78,   // 0.75 - 0.85 (Anti-Nuclear Bloom standardı)
-    strength:  0.52,   // 0.45 - 0.60 (Zarif lens parlaması)
-    radius:    0.55,   // 0.50 - 0.65 (Doğal sodyum/yağmur sisi difüzyonu)
+    threshold: 0.84,   // Yalnızca parlak neonlar, farlar ve ampuller parlar; gökyüzü/sis patlamaz
+    strength:  0.36,   // Zarif, sinematik lens difüzyonu (beyaz sis örtüsünü önler)
+    radius:    0.45,   // Doğal sodyum/yağmur sisi difüzyonu
   },
   vignette: {
-    offset:    1.08,   // Odak açıklığı
-    darkness:  0.75,   // Gerçek optik düşüş (siyahları gri yapmaz, kenarları derinleştirir)
+    offset:    1.15,   // Geniş odak açıklığı
+    darkness:  0.42,   // ACESFilmic tone-mapping altında köşeleri kömürleştirmeyen doğal optik düşüş
   },
   lensRain: {
     enabled:   true,
-    intensity: 0.35,   // 0.0 (kapalı) .. 1.0 (yoğun fırtına); 0.35 zarif ve sinematik
+    intensity: 0.32,   // Zarif ve sinematik lens yağmuru
     speed:     0.25,
   },
 });
@@ -67,6 +67,8 @@ const RainLensShader = {
     'uTime':      { value: 0.0 },
     'uIntensity': { value: 0.35 },
     'uAspect':    { value: 16.0 / 9.0 },
+    'uVignetteOffset':   { value: 1.08 },
+    'uVignetteDarkness': { value: 0.75 },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -80,6 +82,8 @@ const RainLensShader = {
     uniform float uTime;
     uniform float uIntensity;
     uniform float uAspect;
+    uniform float uVignetteOffset;
+    uniform float uVignetteDarkness;
     varying vec2 vUv;
 
     // Deterministik 2D hash
@@ -101,7 +105,8 @@ const RainLensShader = {
         return;
       }
 
-      vec2 uv = vUv;
+      // UV sınır denetimi (0.0 ile 1.0 arası kesin kenetleme)
+      vec2 uv = clamp(vUv, 0.0, 1.0);
       vec2 totalOffset = vec2(0.0);
       float totalSpecular = 0.0;
 
@@ -110,10 +115,11 @@ const RainLensShader = {
       vec2 cellId = floor(uv * grid);
       vec2 cellUv = fract(uv * grid);
 
-      // 3x3 komşu hücreleri kontrol et (damlacıklar hücre sınırını taşabilir)
-      for (float y = -1.0; y <= 1.0; y += 1.0) {
-        for (float x = -1.0; x <= 1.0; x += 1.0) {
-          vec2 neighbor = vec2(x, y);
+      // 2x2 komşu hücreleri kontrol et (Optimizasyon: Sadece en yakın 4 hücre)
+      vec2 offsetDir = sign(cellUv - 0.5); // Bulunduğumuz çeyreğe göre yön
+      for (float y = 0.0; y <= 1.0; y += 1.0) {
+        for (float x = 0.0; x <= 1.0; x += 1.0) {
+          vec2 neighbor = vec2(x * offsetDir.x, y * offsetDir.y);
           vec2 cId = cellId + neighbor;
           vec2 rnd = hash22(cId);
 
@@ -155,49 +161,26 @@ const RainLensShader = {
         }
       }
 
-      // Kırılmış sahne görüntüsünü örnekle
-      vec2 refractedUv = clamp(uv - totalOffset, 0.001, 0.999);
+      // Kırılmış sahne görüntüsünü UV sınır korumalı ve negatif değer filtresiyle örnekle
+      vec2 refractedUv = clamp(uv - totalOffset, 0.0, 1.0);
       vec4 sceneCol = texture2D(tDiffuse, refractedUv);
+      sceneCol = max(vec4(0.0), sceneCol);
 
-      // Specular su parlaklığını ekle
-      sceneCol.rgb += vec3(totalSpecular * 0.9, totalSpecular * 0.95, totalSpecular * 1.10);
+      // Specular su parlaklığını güvenli şekilde ekle
+      sceneCol.rgb += max(vec3(0.0), vec3(totalSpecular * 0.9, totalSpecular * 0.95, totalSpecular * 1.10));
+
+      // Vignette Optimizasyonu (Tek pass içinde birleştirildi)
+      vec2 vigUv = (vUv - vec2(0.5)) * vec2(uVignetteOffset);
+      float factor = clamp(dot(vigUv, vigUv), 0.0, 1.0);
+      float vig = clamp(1.0 - factor * uVignetteDarkness, 0.0, 1.0);
+      sceneCol.rgb *= vig;
 
       gl_FragColor = sceneCol;
     }
   `,
 };
 
-// Gerçek optik düşüşlü, siyahları koruyan temiz Vignette
-const CleanVignetteShader = {
-  name: 'CleanVignetteShader',
-  uniforms: {
-    'tDiffuse': { value: null },
-    'offset':   { value: 1.08 },
-    'darkness': { value: 0.75 },
-  },
-  vertexShader: `
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-    }
-  `,
-  fragmentShader: `
-    uniform float offset;
-    uniform float darkness;
-    uniform sampler2D tDiffuse;
-    varying vec2 vUv;
 
-    void main() {
-      vec4 texel = texture2D( tDiffuse, vUv );
-      vec2 uv = ( vUv - vec2( 0.5 ) ) * vec2( offset );
-      float factor = clamp( dot( uv, uv ), 0.0, 1.0 );
-      // Gerçek optik karartma: Siyahlar tam siyah (0.0) kalır, kenarlar sinematik derinleşir
-      float vig = clamp( 1.0 - factor * darkness, 0.0, 1.0 );
-      gl_FragColor = vec4( texel.rgb * vig, texel.a );
-    }
-  `,
-};
 
 /**
  * Post-processing boru hattını ilklendirir.
@@ -213,8 +196,18 @@ export async function initPostprocessing(renderer, scene, camera, config = {}) {
     const width  = window.innerWidth  || 1920;
     const height = window.innerHeight || 1080;
 
-    // 1. EffectComposer Kurulumu — Renderer Pixel Ratio ile Tam Senkron
-    _composer = new EffectComposer(renderer);
+    // 1. EffectComposer Kurulumu — 16-Bit HalfFloatType HDR Render Target
+    // 8-bit renk basamaklanmasını (color banding) tamamen yok eder,
+    // Bloom ve ACESFilmic tone-mapping geçişlerine pürüzsüz HDR hassasiyeti kazandırır.
+    const renderTarget = new THREE.WebGLRenderTarget(width, height, {
+      type:          THREE.HalfFloatType,
+      format:        THREE.RGBAFormat,
+      minFilter:     THREE.LinearFilter,
+      magFilter:     THREE.LinearFilter,
+      stencilBuffer: false,
+    });
+
+    _composer = new EffectComposer(renderer, renderTarget);
     _composer.setPixelRatio(renderer.getPixelRatio());
     _composer.setSize(width, height);
 
@@ -234,8 +227,8 @@ export async function initPostprocessing(renderer, scene, camera, config = {}) {
     };
     _composer.addPass(_renderPass);
 
-    // 3. UnrealBloomPass — Anti-Nuclear Bloom
-    const bloomRes = new THREE.Vector2(width, height);
+    // 3. UnrealBloomPass — Anti-Nuclear Bloom (Downscaled for performance)
+    const bloomRes = new THREE.Vector2(width / 2, height / 2);
     _bloomPass = new UnrealBloomPass(
       bloomRes,
       POST_CONFIG.bloom.strength,
@@ -251,21 +244,33 @@ export async function initPostprocessing(renderer, scene, camera, config = {}) {
     _rainLensPass = new ShaderPass(RainLensShader);
     _rainLensPass.uniforms['uIntensity'].value = POST_CONFIG.lensRain.intensity;
     _rainLensPass.uniforms['uAspect'].value    = width / height;
+    _rainLensPass.uniforms['uVignetteOffset'].value = POST_CONFIG.vignette.offset;
+    _rainLensPass.uniforms['uVignetteDarkness'].value = POST_CONFIG.vignette.darkness;
     _composer.addPass(_rainLensPass);
-
-    // 5. Subtle Cinematic Vignette — Gerçek Optik Karartma
-    _vignettePass = new ShaderPass(CleanVignetteShader);
-    _vignettePass.uniforms['offset'].value   = POST_CONFIG.vignette.offset;
-    _vignettePass.uniforms['darkness'].value = POST_CONFIG.vignette.darkness;
-    _composer.addPass(_vignettePass);
 
     // 6. OutputPass — ACESFilmic Tone Mapping & sRGB Color Space
     _outputPass = new OutputPass();
     _composer.addPass(_outputPass);
 
+    // GLSL Hatalarını Yakalamak İçin Dummy Render Testi
+    // Shader derlemesi asenkron veya ilk render anında tetiklendiği için 
+    // burada sahte bir kare çizdirerek olası syntax hatalarını yakalıyoruz.
+    _composer.render(0.016);
+    
+    // Three.js bazı shader derleme hatalarında exception fırlatmaz, sadece loglar.
+    // Bu yüzden programları manuel kontrol edip bozuk shader varsa biz fırlatıyoruz.
+    if (renderer.info.programs) {
+      for (const program of renderer.info.programs) {
+        if (program.diagnostics && !program.diagnostics.runnable) {
+          throw new Error('Shader compilation failed in post-processing: ' + program.name);
+        }
+      }
+    }
+
     _active = true;
   } catch (err) {
-    console.warn('[PostProcessing] EffectComposer başlatılamadı, doğrudan WebGL fallback uygulanacak:', err);
+    console.error('[PostProcessing] KRİTİK HATA: Shader derleme veya başlatma başarısız oldu.', err);
+    console.warn('[PostProcessing] Güvenlik için Post-Processing devre dışı bırakıldı. Düz WebGL render (Fallback) uygulanacak.');
     _active = false;
   }
 }
@@ -294,14 +299,6 @@ export function renderPostprocessing(delta = 0.016) {
   return true;
 }
 
-// Geriye dönük uyumluluk alias'ı (argüman esnekliği ile)
-export function renderPostProcessing(renderer, scene, camera, delta) {
-  if (typeof renderer === 'number') {
-    return renderPostprocessing(renderer);
-  }
-  return renderPostprocessing(delta || 0.016);
-}
-
 /**
  * Pencere boyutu değiştiğinde EffectComposer ve pass çözünürlüklerini günceller.
  *
@@ -317,16 +314,13 @@ export function onResizePostprocessing(width, height) {
   _composer.setSize(width, height);
 
   if (_bloomPass && _bloomPass.resolution) {
-    _bloomPass.resolution.set(width, height);
+    _bloomPass.resolution.set(width / 2, height / 2);
   }
 
   if (_rainLensPass && _rainLensPass.uniforms['uAspect']) {
     _rainLensPass.uniforms['uAspect'].value = width / height;
   }
 }
-
-// Geriye dönük uyumluluk alias'ı
-export const resizePostProcessing = onResizePostprocessing;
 
 /**
  * Lens yağmuru yoğunluğunu ayarlar (0.0 .. 1.0)

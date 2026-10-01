@@ -19,23 +19,30 @@
  */
 
 import * as THREE from 'three';
+import { playFootstep } from './audio.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // VIEWMODEL DEFAULT TRANSFORMS (Camera-Local Space)
 // ══════════════════════════════════════════════════════════════════════════════
 
 // Şemsiye kök grubunun kamera yerel koordinatlarındaki baz konumu ve rotasyonu
-// Ekranın üst kısmını zarifçe taçlandıracak ve yolun önünü (orta ve alt %80) tamamen açık bırakacak şekilde kalibre edilmiştir.
+// Ekranın üst kısmını zarifçe taçlandıracak ve yolun önünü tamamen açık bırakacak, 
+// aynı zamanda kamerasının near plane (0.1) yüzeyinden geçmemesi için kameradan uzak tutulmuştur.
+// Şemsiye kök grubunun kamera yerel koordinatlarındaki ergonomik baz konumu ve rotasyonu:
+// 54° dikey FOV perspektifinde (Z = -0.58m mesafede ekran üst sınırı y ≈ +0.30m):
+// Kubbe (canopy) ekranın üst ve üst-sağ kısmını zarifçe çerçeveler,
+// metalik teller başımızın üstünde kubbe oluşturur,
+// baston gövdesi ve cilalı maun J-kulp sağ alt periferide elimizde doğal olarak durur.
 const BASE_POS = Object.freeze({
-  x:  0.12,
-  y:  0.44,
-  z: -0.50,
+  x:  0.22,  // Sağ elde tutuş
+  y:  0.14,  // Başımızın hemen üstünde, ekranın üst kenarını çerçeveleyen kubbe
+  z: -0.58,  // Görüş alanı içinde zarif sinematik mesafe (Near plane 0.1 aşılmaz)
 });
 
 const BASE_ROT = Object.freeze({
-  x: -0.06,
-  y: -0.12,
-  z: -0.08,
+  x: -0.14,  // Öne doğru doğal eğim
+  y: -0.10,  // Hafifçe sola/yola doğru bakış açısı
+  z: -0.05,  // Hafif sağa yatık tutuş
 });
 
 // Yürüyüş frekansı ve salınım genlikleri
@@ -51,7 +58,6 @@ const CANOPY_RADIUS = 0.72;  // Kubbe yarıçapı
 const CANOPY_HEIGHT = 0.22;  // Kubbe derinliği
 const CANOPY_SEGS   = 16;    // Kubbe dilim sayısı (teller için 16 segment)
 const SHAFT_RADIUS  = 0.007; // Baston gövde yarıçapı
-const SHAFT_LENGTH  = 0.95;  // Baston uzunluğu
 const HANDLE_RADIUS = 0.038; // J-kulp kıvrım yarıçapı
 const HANDLE_TUBE   = 0.011; // J-kulp boru kalınlığı
 
@@ -63,14 +69,33 @@ let _fpsGroup    = null; // Kameraya eklenen görünüm modeli kök grubu
 let _canopyMesh  = null; // Kubbe mesh referansı (dünya pozisyonu hesaplama için)
 let _walkTime    = 0;    // Yürüyüş zamanı (saniye)
 
+// ── Faz 4: Biyomekanik Şemsiye Kütle Ataleti ve Gecikme Durumu ─────────────
+let _umbLagYaw   = 0.0; // Şemsiyenin gecikmeli takip açısı
+let _lastHeadYaw = 0.0; // Son kafa açısı
+let _lastDragYaw = 0.0; // Son sürüklenme (drag) açısı farkı
+
+// ── Faz 4 Mikro Detay: Şemsiye Silkeleme Titreşimi (Umbrella Shake) ────────
+let _shakeTimer        = 0.0;
+const SHAKE_DURATION   = 0.40; // 0.40 saniye sönümlü titreşim süresi
+
+// ── Faz 8: Biyomekanik Kamera Yürüyüş Fiziği State'i ─────────────────────────
+let _cameraRef       = null;
+let _simTime         = 0.0;
+let _headYaw         = 0.0;
+let _keyTurnLeft     = false;
+let _keyTurnRight    = false;
+let _stepLanded      = false;
+let _footstepIsLeft  = false;
+
+const _camConfig = {
+  baseX:  -4.044,
+  baseY:   1.78,
+  baseZ:   0.00,
+  lookAt:  { x: -1.2, y: 1.55, z: 120.0 }
+};
+
 // Zero-allocation dünya pozisyonu vektörü
 const _umbCenter = new THREE.Vector3();
-
-// Phase 4 rain.js için çarpışma nesnesi
-const _umbCollider = Object.freeze({
-  center: _umbCenter,
-  radius: CANOPY_RADIUS,
-});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MATERIALS
@@ -259,7 +284,7 @@ function _buildFpsUmbrella(mat) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 /**
- * First-Person Şemsiyeyi başlatır ve kameraya ekler.
+ * First-Person Şemsiyeyi ve kamera yürüyüş fiziğini başlatır.
  *
  * @param {THREE.Scene}             scene
  * @param {THREE.Group}            [group]
@@ -267,12 +292,25 @@ function _buildFpsUmbrella(mat) {
  * @param {THREE.PerspectiveCamera}[camera]
  */
 export async function initWalker(scene, group, config, camera) {
-  const showUmb = config?.walker?.showUmbrella ?? false;
+  _cameraRef = camera || null;
+  if (config?.camera) {
+    if (typeof config.camera.baseX === 'number') _camConfig.baseX = config.camera.baseX;
+    if (typeof config.camera.baseY === 'number') _camConfig.baseY = config.camera.baseY;
+    if (typeof config.camera.baseZ === 'number') _camConfig.baseZ = config.camera.baseZ;
+    if (config.camera.lookAt) {
+      if (typeof config.camera.lookAt.x === 'number') _camConfig.lookAt.x = config.camera.lookAt.x;
+      if (typeof config.camera.lookAt.y === 'number') _camConfig.lookAt.y = config.camera.lookAt.y;
+      if (typeof config.camera.lookAt.z === 'number') _camConfig.lookAt.z = config.camera.lookAt.z;
+    }
+  }
+
+  const showUmb = config?.walker?.showUmbrella ?? true;
   const mat = _createMaterials();
 
   // FPS Viewmodel şemsiyesini oluştur
   _fpsGroup = _buildFpsUmbrella(mat);
   _fpsGroup.visible = showUmb;
+  _fpsGroup.scale.set(0.78, 0.78, 0.78); // Görüş alanını doğal çerçeveleyen sinematik oran
 
   // Baz transformlarını ayarla
   _fpsGroup.position.set(BASE_POS.x, BASE_POS.y, BASE_POS.z);
@@ -297,50 +335,228 @@ export async function initWalker(scene, group, config, camera) {
 }
 
 /**
- * Yürüyüş döngüsü senkronizasyonu ve şemsiyenin gecikmeli (damped) yaylanması.
+ * Biyomekanik kamera yürüyüş fiziği, kafa yaylanması (head-bob), şok sönümleme ve bakış yönü.
+ * SIFIR ALLOCATION: Her frame 0 heap tahsisi.
  *
- * Matematik:
- *   lagTime = walkTime - LAG_PHASE
- *   pos.x = BASE.x + sin(lagTime) * SWAY_POS_X
- *   pos.y = BASE.y + sin(lagTime * 2) * SWAY_POS_Y
- *   rot.z = BASE.z + sin(lagTime) * SWAY_ROT_Z
- *   rot.x = BASE.x + sin(lagTime * 2) * SWAY_ROT_X
+ * @param {THREE.PerspectiveCamera} camera
+ * @param {number} dt
+ * @param {object|number|null} [turnInput]
+ */
+function _updateCameraPhysics(camera, dt, turnInput) {
+  _simTime += dt;
+
+  // 1. Etkileşimli Sağa/Sola Bakış (Interactive Head Turn — Lerp Damping)
+  let left = _keyTurnLeft;
+  let right = _keyTurnRight;
+  if (turnInput && typeof turnInput === 'object') {
+    if (typeof turnInput.turnLeft === 'boolean') left = turnInput.turnLeft;
+    if (typeof turnInput.turnRight === 'boolean') right = turnInput.turnRight;
+  }
+
+  if (typeof turnInput === 'number') {
+    _headYaw = turnInput;
+  } else {
+    const targetYaw = left ? 0.55 : (right ? -0.55 : 0.0);
+    _headYaw = THREE.MathUtils.lerp(_headYaw, targetYaw, 1.0 - Math.exp(-8.5 * dt));
+  }
+
+  // 2a. Kaldırım Üzerinde Doğal Yanal Süzülme (Lateral Drift)
+  const drift = Math.sin(0.12 * _simTime) * 0.085 + Math.cos(0.23 * _simTime + 1.1) * 0.045;
+  const wanderBaseX = _camConfig.baseX + drift;
+
+  // 2b. Biyomekanik Asimetrik Adım Yaylanması & Organik Mikro-Gürültü
+  _walkTime += dt * STRIDE_FREQ;
+
+  // Asimetrik topuk basışı ve toparlanma dalga formu (gait curve):
+  const gaitV = Math.sin(_walkTime * 2) + 0.28 * Math.sin(_walkTime * 4 - 0.40) - 0.10 * Math.cos(_walkTime * 2);
+  // Yere basış anında mikro şok sönümlemesi:
+  const landingShock = Math.max(0.0, -gaitV - 0.85) * 0.008;
+
+  // İrrasyonel alt frekanslı mikro-gürültüler (periyotsuz doğal canlılık):
+  const ny = Math.sin(0.71 * _simTime + 0.3) * 0.0048 + Math.sin(1.37 * _simTime + 1.2) * 0.0032 + Math.sin(2.83 * _simTime) * 0.0018;
+  const nx = Math.sin(0.53 * _simTime + 0.7) * 0.0035 + Math.cos(1.19 * _simTime + 2.1) * 0.0022;
+  const nRoll = Math.sin(0.61 * _simTime + 1.5) * 0.0028 + Math.cos(1.43 * _simTime) * 0.0016;
+
+  // Dikey pozisyon (biyomekanik yaylanma + şok sönümleme + mikro gürültü):
+  camera.position.y = _camConfig.baseY + gaitV * 0.038 - landingShock + ny;
+
+  // Güvenlik koridoru: kaldırım üzerinde [-4.25, -3.85] m aralığında tutulur
+  const rawX = wanderBaseX + Math.sin(_walkTime) * 0.020 + nx;
+  camera.position.x = Math.min(-3.85, Math.max(-4.25, rawX));
+  camera.position.z = _camConfig.baseZ;
+
+  // 2c. Islak Adım Sesi (Procedural Footstep Audio Sync)
+  if (gaitV < -0.88 && !_stepLanded) {
+    _footstepIsLeft = !_footstepIsLeft;
+    playFootstep(_footstepIsLeft);
+    _stepLanded = true;
+  } else if (gaitV > -0.20) {
+    _stepLanded = false;
+  }
+
+  // 3. Bakış Yönü + Kafa Dönüşü (CONFIG.camera.lookAt referanslı)
+  const baseTargetX = _camConfig.lookAt.x;
+  const baseTargetY = _camConfig.lookAt.y;
+  const lookDist    = _camConfig.lookAt.z;
+
+  const lookX = baseTargetX + Math.sin(_headYaw) * lookDist;
+  const lookY = baseTargetY;
+  const lookZ = camera.position.z + Math.cos(_headYaw) * lookDist;
+
+  camera.lookAt(lookX, lookY, lookZ);
+
+  // Adım eğimi (tilt roll + mikro gürültü):
+  camera.rotateZ(Math.sin(_walkTime) * 0.009 + nRoll);
+
+  // Kamera matrisini tazeleyerek çocuk nesnelerin (şemsiye vb.) güncel dünya koordinatlarını okumasını sağla
+  camera.updateMatrixWorld(true);
+}
+
+/**
+ * Yürüyüş döngüsü senkronizasyonu, kamera kinematiği ve şemsiyenin gecikmeli (damped) yaylanması.
  *
  * SIFIR ALLOCATION: Her frame 0 heap tahsisi.
  *
  * @param {number} delta — Frame delta süresi (saniye)
+ * @param {THREE.PerspectiveCamera} [camera]
+ * @param {object|number|null} [turnInput] — { turnLeft, turnRight } veya legacy headYaw sayısı
  */
-export function updateWalker(delta, camera, headYaw = 0.0) {
+export function updateWalker(delta, camera, turnInput = null) {
+  const targetCam = camera || _cameraRef;
+  const dt = Math.min(delta, 0.1);
+
+  if (targetCam) {
+    _updateCameraPhysics(targetCam, dt, turnInput);
+  } else {
+    _walkTime += dt * STRIDE_FREQ;
+  }
+
+  // 1. İkinci Derece Kütle ve Hava Direnci Ataleti (Rotational Drag / Inertia Lag)
+  _lastHeadYaw = _headYaw;
+  _umbLagYaw = THREE.MathUtils.lerp(_umbLagYaw, _headYaw, 1.0 - Math.exp(-4.2 * dt));
+  const dragYaw = _umbLagYaw - _headYaw;
+  _lastDragYaw = dragYaw;
+
   if (!_fpsGroup || !_fpsGroup.visible) return;
 
-  _walkTime += delta * STRIDE_FREQ;
-
-  // Gecikmeli harmonik osilatörler (İnsan kolunun ataleti)
+  // Gecikmeli harmonik osilatörler (İnsan kolunun ağırlığı ve esnekliği)
   const lagTime  = _walkTime - LAG_PHASE;
   const sLag     = Math.sin(lagTime);
   const sLag2    = Math.sin(lagTime * 2);
 
-  // 1. Damped Viewmodel Sway (Adım yaylanması + Kafa dönüşünde kol ataleti)
-  _fpsGroup.position.x = BASE_POS.x + sLag  * SWAY_POS_X - headYaw * 0.035;
-  _fpsGroup.position.y = BASE_POS.y + sLag2 * SWAY_POS_Y;
+  // 2b. Şemsiye Silkeleme Titreşim Fiziği ('R' tuşu ile tetiklenir, 0.4 saniye sönümlü)
+  let shakeOffsetRotZ = 0.0;
+  let shakeOffsetRotY = 0.0;
+  let shakeOffsetPosX = 0.0;
+  let shakeOffsetPosY = 0.0;
 
-  _fpsGroup.rotation.z = BASE_ROT.z + sLag  * SWAY_ROT_Z;
+  if (_shakeTimer > 0.0) {
+    _shakeTimer = Math.max(0.0, _shakeTimer - dt);
+    const progress = 1.0 - (_shakeTimer / SHAKE_DURATION); // 0.0 -> 1.0
+    const envelope = Math.exp(-progress * 4.8); // Hızlı üstel sönüm
+    const wave = Math.sin(progress * 26.0 * Math.PI * 2) * envelope;
+
+    shakeOffsetRotZ = wave * 0.085;  // ±0.085 rad rotasyonel sarsıntı
+    shakeOffsetRotY = wave * 0.055;
+    shakeOffsetPosX = wave * 0.016;  // ±1.6 cm yanal mikro titreşim
+    shakeOffsetPosY = Math.abs(wave) * 0.012;
+  }
+
+  // 2. Damped Viewmodel Sway (Adım yaylanması + Kafa dönüşünde kol ataleti + Silkeleme)
+  _fpsGroup.position.x = BASE_POS.x + sLag * SWAY_POS_X + dragYaw * 0.075 + shakeOffsetPosX;
+  _fpsGroup.position.y = BASE_POS.y + sLag2 * SWAY_POS_Y + shakeOffsetPosY;
+  _fpsGroup.position.z = BASE_POS.z;
+
+  _fpsGroup.rotation.z = BASE_ROT.z + sLag * SWAY_ROT_Z - dragYaw * 0.32 + shakeOffsetRotZ;
   _fpsGroup.rotation.x = BASE_ROT.x + sLag2 * SWAY_ROT_X;
-  _fpsGroup.rotation.y = BASE_ROT.y - headYaw * 0.22;
+  _fpsGroup.rotation.y = BASE_ROT.y - _headYaw * 0.22 + dragYaw * 0.45 + shakeOffsetRotY;
 
-  // 2. Yağmur Çarpışma Collider Koordinatını Güncelle (Zero Alloc)
+  // 3. Matris Senkronizasyonu:
+  _fpsGroup.updateMatrixWorld(true);
+
+  // 4. Yağmur Çarpışma Collider Koordinatını Güncelle (Zero Alloc)
   if (_canopyMesh) {
     _canopyMesh.getWorldPosition(_umbCenter);
-    // Kubbe merkez ofseti
     _umbCenter.y += CANOPY_HEIGHT * 0.15;
   }
 }
 
 /**
- * Şemsiye çarpışma verisini döndürür (Phase 4 rain.js entegrasyonu).
+ * Şemsiye çarpışma verisini döndürür (rain.js entegrasyonu).
+ * Şemsiye görünür değilse collider devre dışı (enabled: false) döner.
  *
- * @returns {{ center: THREE.Vector3, radius: number }}
+ * @returns {{ center: THREE.Vector3, radius: number, enabled: boolean }}
  */
 export function getUmbrellaCollider() {
-  return _umbCollider;
+  const isVisible = _fpsGroup ? _fpsGroup.visible : false;
+  const currentScaleX = _fpsGroup ? _fpsGroup.scale.x : 1.0;
+  return {
+    center:  _umbCenter,
+    radius:  CANOPY_RADIUS * currentScaleX,
+    enabled: isVisible,
+  };
 }
+
+/**
+ * Faz 4: Şemsiyenin anlık atalet ve gecikme durumunu döndürür (CDP doğrulama için).
+ */
+export function getUmbrellaInertiaData() {
+  return {
+    lagYaw:  _umbLagYaw,
+    dragYaw: _lastDragYaw,
+    headYaw: _lastHeadYaw,
+    visible: _fpsGroup ? _fpsGroup.visible : false,
+    center:  _umbCenter,
+  };
+}
+
+/**
+ * Şemsiye silkeleme titreşimini (Umbrella Shake) tetikler ('R' tuşu).
+ */
+export function triggerUmbrellaShake() {
+  _shakeTimer = SHAKE_DURATION;
+  if (_fpsGroup) {
+    _fpsGroup.visible = true;
+  }
+}
+
+/**
+ * Şemsiye görünürlüğünü dinamik olarak ayarlar.
+ */
+export function setUmbrellaVisible(visible) {
+  if (_fpsGroup) {
+    _fpsGroup.visible = visible;
+    if (visible && _canopyMesh) {
+      _fpsGroup.updateMatrixWorld(true);
+      _canopyMesh.getWorldPosition(_umbCenter);
+      _umbCenter.y += CANOPY_HEIGHT * 0.15;
+    }
+  }
+}
+
+/**
+ * Sağa/sola bakış tuş durumlarını ayarlar.
+ *
+ * @param {boolean} turnLeft
+ * @param {boolean} turnRight
+ */
+export function setWalkerTurnInput(turnLeft, turnRight) {
+  _keyTurnLeft = !!turnLeft;
+  _keyTurnRight = !!turnRight;
+}
+
+/**
+ * Anlık yürüme ve kafa kinematiği verilerini döner.
+ *
+ * @returns {{ walkTime: number, simTime: number, headYaw: number, posX: number, posY: number }}
+ */
+export function getWalkerData() {
+  return {
+    walkTime: _walkTime,
+    simTime:  _simTime,
+    headYaw:  _headYaw,
+    posX:     _cameraRef ? _cameraRef.position.x : 0,
+    posY:     _cameraRef ? _cameraRef.position.y : 0,
+  };
+}
+

@@ -24,19 +24,20 @@ export const ROAD_LENGTH     = 3000;  // Z yönünde uzunluk (-50 .. 2950 m)
 export const CURB_WIDTH      = 0.35;  // Bordür taşı genişliği
 export const CURB_HEIGHT     = 0.26;  // Asfalttan 26 cm, kaldırımdan 12 cm yukarı taşan taş bordür
 export const SIDEWALK_THICK  = 0.14;  // Kaldırım kalınlığı (Y = 0.14m yüzey)
-export const SIDEWALK_WIDTH  = 10.0;  // Binaların ve ara sokakların altına kadar uzanan kesintisiz ferah kaldırım
+export const SIDEWALK_WIDTH  = 4.4;   // Sinematik metropolitan kaldırım genişliği (3.2m bina mesafesi, samimi sokak dokusu)
 
-// Sağ Kaldırım (Yürüdüğümüz taraf: -4.50 m): Bordür -2.72m, kaldırım -2.80 ile -12.80m arası (bina hattının 5m altına uzanır)
-export const RIGHT_CURB_X    = -2.72; // Sağ bordür merkezi
-export const RIGHT_SW_X      = -7.80; // Sağ kaldırım merkezi (Kamera baseX = -4.50 ferah şekilde yürür)
-// Sol Kaldırım (Karşı taraf): Bordür +6.37m, kaldırım +6.45 ile +16.45m arası
-export const LEFT_CURB_X     =  6.37; // Karşı sol bordür merkezi
-export const LEFT_SW_X       = 11.45; // Karşı sol kaldırım merkezi
-export const SIDEWALK_OUTER_X=  7.50; // Geriye dönük uyumluluk
+// Sağ Kaldırım (Yürüdüğümüz taraf):
+export const RIGHT_CURB_X    = ROAD_MIN_X - (CURB_WIDTH / 2);
+export const RIGHT_SW_X      = RIGHT_CURB_X - (CURB_WIDTH / 2) - (SIDEWALK_WIDTH / 2);
 
-// Bina ön cephe hatları (Kaldırımın dış kenarından ferah pay bırakılarak):
-export const BUILDING_LINE_RIGHT = -7.80; // Sağ bina cephe hattı
-export const BUILDING_LINE_LEFT  = 11.40; // Sol bina cephe hattı
+// Sol Kaldırım (Karşı taraf):
+export const LEFT_CURB_X     = ROAD_MAX_X + (CURB_WIDTH / 2);
+export const LEFT_SW_X       = LEFT_CURB_X + (CURB_WIDTH / 2) + (SIDEWALK_WIDTH / 2);
+export const SIDEWALK_OUTER_X= LEFT_SW_X + (SIDEWALK_WIDTH / 2); // Geriye dönük uyumluluk
+
+// Bina ön cephe hatları (Kaldırımın dış kenarına hizalı):
+export const BUILDING_LINE_RIGHT = RIGHT_SW_X - (SIDEWALK_WIDTH / 2); // Sağ bina cephe hattı
+export const BUILDING_LINE_LEFT  = LEFT_SW_X + (SIDEWALK_WIDTH / 2);  // Sol bina cephe hattı
 
 const Z_CENTER               = 1450;  // Geometri merkezi
 
@@ -84,23 +85,25 @@ function _createPuddleTexture() {
       const u = x / width;
       const v = y / height;
 
-      // İki ana şerit tekerlek izi
-      const dTrack1 = Math.abs(u - 0.26);
-      const dTrack2 = Math.abs(u - 0.74);
-      const trackWet = (dTrack1 < 0.08 ? (1.0 - dTrack1 / 0.08) : 0.0) +
-                       (dTrack2 < 0.08 ? (1.0 - dTrack2 / 0.08) : 0.0);
+      // İki ana araç tekerlek izi oluğu
+      const dTrack1 = Math.abs(u - 0.28);
+      const dTrack2 = Math.abs(u - 0.72);
+      const trackWet = (dTrack1 < 0.10 ? Math.pow(1.0 - dTrack1 / 0.10, 1.8) : 0.0) +
+                       (dTrack2 < 0.10 ? Math.pow(1.0 - dTrack2 / 0.10, 1.8) : 0.0);
 
-      const puddleNoise = Math.sin(u * 14.0) * Math.cos(v * 26.0) * 0.5 + 0.5;
-      const isPuddle    = puddleNoise > 0.62 ? (puddleNoise - 0.62) / 0.38 : 0.0;
+      // Organik su birikintisi adacıkları (Doğal asfalt çukurları)
+      const p1 = Math.sin(u * 11.3 + v * 6.7) * Math.cos(v * 17.5 - u * 3.8) * 0.5 + 0.5;
+      const p2 = Math.sin(u * 6.1  + v * 28.0) * 0.5 + 0.5;
+      const puddleNoise = p1 * 0.65 + p2 * 0.35;
+      const isPuddle    = puddleNoise > 0.56 ? Math.pow((puddleNoise - 0.56) / 0.44, 1.2) : 0.0;
 
-      const wet = Math.min(1.0, 0.25 + trackWet * 0.45 + isPuddle * 0.40);
+      const wet = Math.min(1.0, 0.20 + trackWet * 0.55 + isPuddle * 0.50);
 
-      const dX = Math.cos(u * 40.0 + v * 20.0) * 0.5 + 0.5;
-      const dY = Math.sin(u * 20.0 + v * 50.0) * 0.5 + 0.5;
-
+      // R: ıslaklık/yansıma maskesi (0..255)
+      // G, B: mikro su yüzeyi gradyanı
       data[idx]     = Math.floor(wet * 255);
-      data[idx + 1] = Math.floor(dX * 255);
-      data[idx + 2] = Math.floor(dY * 255);
+      data[idx + 1] = 128;
+      data[idx + 2] = 128;
       data[idx + 3] = 255;
     }
   }
@@ -110,9 +113,69 @@ function _createPuddleTexture() {
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(1, 40);
   texture.needsUpdate = true;
   return texture;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ISLAK ASFALT ROUGHNESS MAP (Puddle Mask — Su Birikintisi Roughness Haritası)
+// Çukurlarda ve tekerlek izlerinde: koyu piksel → düşük roughness → ayna yansıma.
+// Genel asfalt yüzeyi: açık piksel → yüksek roughness → dağınık (ıslak beton) yansıma.
+// ════════════════════════════════════════════════════════════════════════════
+
+function _createRoughnessMap() {
+  if (typeof document === 'undefined') return null;
+
+  const W = 256, H = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width  = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  const imgData = ctx.createImageData(W, H);
+  const data    = imgData.data;
+
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const idx = (y * W + x) * 4;
+      const u = x / W;
+      const v = y / H;
+
+      // Tekerlek izleri (U = 0.26 ve 0.74): Buralarda roughness çok düşük (ayna yansıma)
+      const dTrack1 = Math.abs(u - 0.26);
+      const dTrack2 = Math.abs(u - 0.74);
+      const trackWet = Math.max(
+        dTrack1 < 0.09 ? (1.0 - dTrack1 / 0.09) : 0.0,
+        dTrack2 < 0.09 ? (1.0 - dTrack2 / 0.09) : 0.0
+      );
+
+      // Prosedürel su birikintisi deseni (düzensiz organik şekiller)
+      const n1 = Math.sin(u * 13.7 + v * 7.3) * Math.cos(v * 19.1 + u * 4.6) * 0.5 + 0.5;
+      const n2 = Math.sin(u * 7.2  + v * 31.0) * 0.5 + 0.5;
+      const puddleRaw = n1 * 0.65 + n2 * 0.35;
+      const isPuddle  = puddleRaw > 0.58 ? Math.pow((puddleRaw - 0.58) / 0.42, 0.7) : 0.0;
+
+      // roughnessMap: siyah (0) = düşük roughness (parlak/ayna), beyaz (255) = yüksek roughness (mat beton)
+      // Tekerlek izi + su birikintisi alanları: siyaha çek
+      // Genel asfalt: açık griyi koru
+      const wetness    = Math.min(1.0, trackWet * 0.9 + isPuddle * 0.7);
+      const roughVal   = Math.round((1.0 - wetness) * 200); // 0..200 (siyah=ıslak, açık gri=kuru)
+
+      data[idx]     = roughVal;
+      data[idx + 1] = roughVal;
+      data[idx + 2] = roughVal;
+      data[idx + 3] = 255;
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 40); // Puddle tex ile aynı oran
+  tex.needsUpdate = true;
+  return tex;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -205,18 +268,20 @@ const WetAsphaltReflectorShader = {
     tDiffuse:      { value: null },
     textureMatrix: { value: new THREE.Matrix4() },
     tPuddle:       { value: null },
-    uBlendFactor:  { value: 0.28 },                      // Aşırı beyazlamayı önleyen derin yansıma
+    uBlendFactor:  { value: 0.35 },                      // Canlı su birikintisi yansıması
+    uTime:         { value: 0.0 },                       // Yağmur mikro-ripple zamanı
     fogColor:      { value: new THREE.Color(0x050510) },
     fogDensity:    { value: 0.00045 },
   },
   vertexShader: `
     uniform mat4 textureMatrix;
     varying vec4 vUv;
-    varying vec2 vWorldUv;
+    varying vec2 vWorldPos;
 
     void main() {
       vUv = textureMatrix * vec4( position, 1.0 );
-      vWorldUv = uv * vec2( 1.0, 60.0 );
+      vec4 wp = modelMatrix * vec4( position, 1.0 );
+      vWorldPos = wp.xz;
       gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
     }
   `,
@@ -225,32 +290,43 @@ const WetAsphaltReflectorShader = {
     uniform sampler2D tDiffuse;
     uniform sampler2D tPuddle;
     uniform float uBlendFactor;
+    uniform float uTime;
     uniform vec3 fogColor;
     uniform float fogDensity;
 
     varying vec4 vUv;
-    varying vec2 vWorldUv;
+    varying vec2 vWorldPos;
 
     void main() {
-      vec4 puddle = texture2D( tPuddle, vWorldUv );
+      // Metrik orantılı su birikintisi UV örneklemesi (8.75m yol genişliğine tam oturan oran)
+      vec2 puddleUv = vec2((vWorldPos.x - 1.825) / 8.75 + 0.5, vWorldPos.y * 0.04);
+      vec4 puddle = texture2D( tPuddle, puddleUv );
 
-      // Dikey uzayan lens ışık izi distorsiyonu
-      vec2 distortion = (puddle.gb - 0.5) * 0.018;
+      // Yağmur damlalarının su yüzeyinde oluşturduğu doğal mikro dalgalanma (fiziksel ripple)
+      vec2 ripple = vec2(
+        sin(vWorldPos.y * 4.0 + vWorldPos.x * 2.0 + uTime * 4.2) * 0.0018,
+        cos(vWorldPos.x * 3.5 - vWorldPos.y * 1.5 + uTime * 3.6) * 0.0018
+      );
+
       vec4 projUv = vUv;
-      projUv.xy += distortion * projUv.w;
+      projUv.xy += ripple * projUv.w;
 
       vec4 reflection = vec4( color, 1.0 );
       if ( projUv.w > 0.0001 ) {
         vec2 projCoord = projUv.xy / projUv.w;
-        // Ekran koordinatları sınırlarında güvenli örnekleme (kenar sızmalarını ve çarpık taşmaları önler)
+        // Ekran koordinatları sınırlarında güvenli örnekleme
         if ( projCoord.x >= 0.0 && projCoord.x <= 1.0 && projCoord.y >= 0.0 && projCoord.y <= 1.0 ) {
           reflection = texture2D( tDiffuse, projCoord );
         }
       }
 
-      // Koyu asfalt ile hafif specular yansıma
-      float wetness = uBlendFactor * (0.30 + 0.70 * puddle.r);
-      vec3 finalColor = mix( color, reflection.rgb, wetness );
+      // Asfalt mikrogren zemin dokusu (derin zift varyasyonu)
+      float grain = fract(sin(dot(floor(vWorldPos * 12.0), vec2(12.9898, 78.233))) * 43758.5453);
+      vec3 asphaltBase = color * (0.90 + grain * 0.20);
+
+      // Su birikintisi ve tekerlek izi parlaklığı (Fresnel etkisi ile)
+      float wetness = uBlendFactor * smoothstep(0.38, 0.72, puddle.r);
+      vec3 finalColor = mix( asphaltBase, reflection.rgb, wetness );
 
       // Sahne sisi ile senkronizasyon
       float depth = gl_FragCoord.z / gl_FragCoord.w;
@@ -305,13 +381,18 @@ export function updateGround(delta) {
 
   if (!_reflector || !_sceneRef) return;
 
-  if (_sceneRef.fog && _reflector.material && _reflector.material.uniforms) {
+  if (_reflector.material && _reflector.material.uniforms) {
     const u = _reflector.material.uniforms;
-    if (u.fogColor && u.fogColor.value) {
-      u.fogColor.value.copy(_sceneRef.fog.color);
+    if (u.uTime) {
+      u.uTime.value += delta;
     }
-    if (u.fogDensity) {
-      u.fogDensity.value = _sceneRef.fog.density;
+    if (_sceneRef.fog) {
+      if (u.fogColor && u.fogColor.value) {
+        u.fogColor.value.copy(_sceneRef.fog.color);
+      }
+      if (u.fogDensity) {
+        u.fogDensity.value = _sceneRef.fog.density;
+      }
     }
   }
 }
@@ -324,10 +405,10 @@ export function updateGround(delta) {
  */
 function _calcReflectorDimensions(width, height) {
   const aspect = (width > 0 && height > 0) ? (width / height) : (16 / 9);
-  const maxDim = 1536;
+  const maxDim = 1024;
 
-  let targetW = width * 0.5;
-  let targetH = height * 0.5;
+  let targetW = width * 0.35;
+  let targetH = height * 0.35;
 
   if (targetW > maxDim || targetH > maxDim) {
     if (aspect >= 1.0) {
@@ -358,12 +439,16 @@ export function onResizeGround(width, height) {
 function _initMaterials(maxAniso = 16) {
   _puddleTex   = _createPuddleTexture();
   _sidewalkTex = _createSidewalkTexture(maxAniso);
+  const roughnessTex = _createRoughnessMap();
 
-  // Koyu ıslak zift asfaltı — derin siyah kontrast
+  // Koyu ıslak zift asfaltı — derin siyah kontrast.
+  // roughnessMap: çukurlarda/tekerlek izlerinde düşük roughness (ayna yansıma),
+  //              genel yüzeyde yüksek roughness (dağınık/ıslak beton yansıma).
   _matAsphalt = new THREE.MeshStandardMaterial({
-    color:     0x090b10,
-    roughness: 0.18,
-    metalness: 0.28,
+    color:        0x090b10,
+    roughness:    0.65,      // ← 0.18'den yükseltildi: genel beton mat, sadece birikintiler parlar
+    metalness:    0.28,
+    roughnessMap: roughnessTex, // Puddle Mask: su birikintisi/tekerlek izleri parlak, genel yüzey mat
   });
 
   // Kaldırımlar: Dokulu ıslak granit taş döşeme (Pavers) — 0xffffff ile map dokusu tam zenginliğiyle yansır
@@ -403,15 +488,15 @@ function _initMaterials(maxAniso = 16) {
 function _buildRoad() {
   const geo = new THREE.PlaneGeometry(ROAD_WIDTH, ROAD_LENGTH);
 
-  // 1. Taban Koyu Asfalt Düzlemi (Y = 0)
+  // 1. Taban Koyu Asfalt Düzlemi (Y = -0.020 m — Reflector altında z-fighting payı)
   const baseMesh = new THREE.Mesh(geo, _matAsphalt);
   baseMesh.name = 'road_base';
   baseMesh.rotation.x = -Math.PI / 2;
-  baseMesh.position.set(ROAD_CENTER_X, 0, Z_CENTER);
+  baseMesh.position.set(ROAD_CENTER_X, -0.020, Z_CENTER);
   baseMesh.receiveShadow = true;
   _group.add(baseMesh);
 
-  // 2. Islak Asfalt Planar Reflector (Y = 0.001 m)
+  // 2. Islak Asfalt Planar Reflector (Y = 0.001 m + polygonOffset)
   if (typeof window !== 'undefined') {
     const { rw, rh } = _calcReflectorDimensions(window.innerWidth, window.innerHeight);
 
@@ -430,16 +515,29 @@ function _buildRoad() {
     _reflector.rotation.x = -Math.PI / 2;
     _reflector.position.set(ROAD_CENTER_X, 0.001, Z_CENTER);
 
-    // Birinci şahıs şemsiye görünüm modelinin asfalta ters yansımasını/çakışmasını önleyen filtre
+    // Derinlik tamponu çakışmasını (z-fighting) kalıcı olarak önleyen polygon offset
+    if (_reflector.material) {
+      _reflector.material.polygonOffset = true;
+      _reflector.material.polygonOffsetFactor = -1.0;
+      _reflector.material.polygonOffsetUnits  = -2.0;
+    }
+
+    // Birinci şahıs şemsiye ve zemin sıçrama halkalarının asfalta ters yansımasını/çift parlamasını önleyen filtre
     const origOnBeforeRender = _reflector.onBeforeRender;
     _reflector.onBeforeRender = function (renderer, scene, camera) {
       const fpsUmb = camera.getObjectByName('fpsUmbrellaRoot');
-      const prevVis = fpsUmb ? fpsUmb.visible : true;
+      const prevUmbVis = fpsUmb ? fpsUmb.visible : true;
       if (fpsUmb) fpsUmb.visible = false;
+
+      // Zemin su sıçramalarını (rainSplashes) reflektör FBO pass'inde gizle (çift parlama ve hayalet artefaktları engeller)
+      const splashes = scene.getObjectByName('rainSplashes');
+      const prevSplashVis = splashes ? splashes.visible : true;
+      if (splashes) splashes.visible = false;
 
       origOnBeforeRender.call(_reflector, renderer, scene, camera);
 
-      if (fpsUmb) fpsUmb.visible = prevVis;
+      if (fpsUmb) fpsUmb.visible = prevUmbVis;
+      if (splashes) splashes.visible = prevSplashVis;
     };
 
     _group.add(_reflector);

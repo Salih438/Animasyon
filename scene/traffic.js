@@ -21,6 +21,7 @@
 
 import * as THREE from 'three';
 import { spawnSplash } from './rain.js';
+import { ROAD_MIN_X, ROAD_MAX_X } from './ground.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CONFIGURATION CONSTANTS
@@ -32,17 +33,16 @@ export const CARS_PER_LANE   = 6;
 // İnsan yürüyüş referans hızı (m/s) — ground.js WALK_SPEED ile senkron
 export const WALK_SPEED_SEC   = 2.8;
 
-// Şerit merkezleri (Kamera baseX = -3.80 m sağ kaldırımda yürür, araçlar solumuzda X >= -2.55 m akar)
-const LANE_X_OUTGOING        = -0.45; // Sağ şerit (Önümüzde gidenler — kırmızı stoplar, kameranın 3.3m solundan akar)
-const LANE_X_INCOMING        =  3.90; // Karşı sol şerit (Karşıdan gelenler — parlak farlar)
+// Şerit merkezleri yola (ROAD_MIN_X ve ROAD_MAX_X) dinamik olarak bağlanır
+const ROAD_WIDTH_SAFE        = ROAD_MAX_X - ROAD_MIN_X;
+const LANE_X_OUTGOING        = ROAD_MIN_X + (ROAD_WIDTH_SAFE * 0.24); // Sağ şerit
+const LANE_X_INCOMING        = ROAD_MAX_X - (ROAD_WIDTH_SAFE * 0.26); // Karşı sol şerit
 
 // Respawn Z sınırları (Sürekli aktif ve yoğun şehir trafiği akışı)
 const Z_INCOMING_RESPAWN_MIN = 220.0;
-const Z_INCOMING_RESPAWN_MAX = 340.0;
 const Z_INCOMING_DESPAWN     = -25.0; // Kameranın arkasına geçme sınırı
 
 const Z_OUTGOING_RESPAWN_MIN = -35.0;
-const Z_OUTGOING_RESPAWN_MAX = -15.0;
 const Z_OUTGOING_DESPAWN     = 320.0; // Uzakta ufka karışma sınırı
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -77,6 +77,27 @@ let _matWheel         = null; // Mat kauçuk lastik & çelik jant
 let _matHeadlight     = null; // Parlak beyaz emissive ön far
 let _matTaillight     = null; // Parlak kırmızı emissive arka stop
 let _headlightBeamMesh= null; // En yakın 2 karşı aracın çift farı (4 volumetrik ışık huzmesi)
+
+// ─── Araç Tekerlek Su Spreyi Havuzu (Wheel Spray Particle Pool) ────────────
+export const WHEEL_SPRAY_POOL_SIZE = 48;
+let _sprayMesh = null;
+const _sprayActive  = new Uint8Array(WHEEL_SPRAY_POOL_SIZE);
+const _sprayLife    = new Float32Array(WHEEL_SPRAY_POOL_SIZE);
+const _sprayMaxLife = new Float32Array(WHEEL_SPRAY_POOL_SIZE);
+const _sprayScale   = new Float32Array(WHEEL_SPRAY_POOL_SIZE);
+const _sprayX       = new Float32Array(WHEEL_SPRAY_POOL_SIZE);
+const _sprayY       = new Float32Array(WHEEL_SPRAY_POOL_SIZE);
+const _sprayZ       = new Float32Array(WHEEL_SPRAY_POOL_SIZE);
+const _sprayVx      = new Float32Array(WHEEL_SPRAY_POOL_SIZE);
+const _sprayVy      = new Float32Array(WHEEL_SPRAY_POOL_SIZE);
+const _sprayVz      = new Float32Array(WHEEL_SPRAY_POOL_SIZE);
+let _sprayPoolPtr   = 0;
+
+const _sprayMat4  = new THREE.Matrix4();
+const _sprayPos   = new THREE.Vector3();
+const _sprayScl   = new THREE.Vector3();
+const _sprayColor = new THREE.Color();
+const _sprayQuat  = new THREE.Quaternion();
 
 // Zero-allocation geçici matematik nesneleri
 const _m4   = new THREE.Matrix4();
@@ -355,6 +376,79 @@ export async function initTraffic(scene, group, config) {
 
   // ── En Yakın 2 Karşı Araç İçin Volumetrik Far Huzmeleri ───────────────────
   _buildHeadlightBeams(targetGroup);
+
+  // ── 12 Araç İçin Tekerlek Su Püskürme / Tozu Havuzu (Wheel Spray Pool) ─────
+  _buildWheelSpray(targetGroup);
+}
+
+function _createWheelSprayTexture() {
+  if (typeof document === 'undefined') return null;
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width  = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, size, size);
+
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0.00, 'rgba(235, 245, 255, 0.75)');
+  grad.addColorStop(0.25, 'rgba(215, 235, 255, 0.40)');
+  grad.addColorStop(0.60, 'rgba(195, 220, 250, 0.12)');
+  grad.addColorStop(1.00, 'rgba(180, 210, 245, 0.00)');
+
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+  ctx.fill();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  return texture;
+}
+
+function _buildWheelSpray(parentGroup) {
+  const sprayGeo = new THREE.PlaneGeometry(0.55, 0.45);
+  sprayGeo.rotateX(-0.25); // Hafif yukarı ve geriye açılı püskürme düzlemi
+
+  const matSpray = new THREE.MeshBasicMaterial({
+    map:         _createWheelSprayTexture(),
+    color:       0xddeeff,
+    transparent: true,
+    opacity:     0.55,
+    blending:    THREE.AdditiveBlending,
+    depthWrite:  false,
+    side:        THREE.DoubleSide,
+  });
+
+  _sprayMesh = new THREE.InstancedMesh(sprayGeo, matSpray, WHEEL_SPRAY_POOL_SIZE);
+  _sprayMesh.name = 'traffic_wheel_sprays';
+  _sprayMesh.frustumCulled = false;
+  _sprayMesh.renderOrder = 3;
+
+  const zeroM4 = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (let k = 0; k < WHEEL_SPRAY_POOL_SIZE; k++) {
+    _sprayMesh.setMatrixAt(k, zeroM4);
+    _sprayActive[k] = 0;
+  }
+  _sprayMesh.instanceMatrix.needsUpdate = true;
+  _sprayMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(WHEEL_SPRAY_POOL_SIZE * 3), 3);
+
+  parentGroup.add(_sprayMesh);
+}
+
+export function spawnWheelSpray(x, y, z, vx, vy, vz, scale = 0.50, life = 0.35) {
+  const id = _sprayPoolPtr;
+  _sprayPoolPtr = (_sprayPoolPtr + 1) % WHEEL_SPRAY_POOL_SIZE;
+
+  _sprayActive[id]  = 1;
+  _sprayLife[id]    = life;
+  _sprayMaxLife[id] = life;
+  _sprayScale[id]   = scale;
+  _sprayX[id]       = x;
+  _sprayY[id]       = y;
+  _sprayZ[id]       = z;
+  _sprayVx[id]      = vx;
+  _sprayVy[id]      = vy;
+  _sprayVz[id]      = vz;
 }
 
 function _createHeadlightBeamTexture() {
@@ -460,11 +554,74 @@ export function updateTraffic(delta) {
     // 0 tahsis: sadece ilkel float konumu atanır
     c.group.position.z = c.z;
 
-    // ── Tekerlek Su Sıçratması (Wet Asphalt Tire Spray) ──────────────────────
-    if (c.z > -8.0 && c.z < 35.0 && Math.random() < 0.22) {
-      const rearZ = c.isIncoming ? (c.z + 1.8) : (c.z - 1.8);
-      const tireX = (Math.random() < 0.5) ? (c.laneX - 0.72) : (c.laneX + 0.72);
-      spawnSplash(tireX, 0.012, rearZ, 1.25, 0.16);
+    // ── Tekerlek Su Sıçratması & Sprey Dumanı (Wet Asphalt Tire Spray) ────────
+    if (c.z > -15.0 && c.z < 65.0) {
+      // 1. Zemin sıçrama halkası (asfalt dalgacığı)
+      if (Math.random() < 0.20) {
+        const rearZ = c.isIncoming ? (c.z + 1.8) : (c.z - 1.8);
+        const tireX = (Math.random() < 0.5) ? (c.laneX - 0.72) : (c.laneX + 0.72);
+        spawnSplash(tireX, 0.012, rearZ, 1.25, 0.16);
+      }
+
+      // 2. Havada asılı kalan tekerlek su spreyi (aerodinamik fırlatma)
+      if (Math.random() < 0.35) {
+        const rearZ = c.isIncoming ? (c.z + 1.9) : (c.z - 1.9);
+        // Her iki arka tekerlekten arkaya ve yukarı doğru fırlayan su sisi
+        const sprayVz = c.isIncoming ? (5.5 + Math.random() * 2.5) : (-5.0 - Math.random() * 2.0);
+        const sprayVy = 1.2 + Math.random() * 0.8;
+        const sprayVxL = -0.3 + (Math.random() - 0.5) * 0.4;
+        const sprayVxR =  0.3 + (Math.random() - 0.5) * 0.4;
+        spawnWheelSpray(c.laneX - 0.72, 0.15, rearZ, sprayVxL, sprayVy, sprayVz, 0.45 + Math.random() * 0.25, 0.38 + Math.random() * 0.15);
+        spawnWheelSpray(c.laneX + 0.72, 0.15, rearZ, sprayVxR, sprayVy, sprayVz, 0.45 + Math.random() * 0.25, 0.38 + Math.random() * 0.15);
+      }
+    }
+  }
+
+  // ── Tekerlek Su Spreyi Parçacık Havuzunu Simüle Et ───────────────────────
+  if (_sprayMesh) {
+    let sprayNeedsUpdate = false;
+    for (let k = 0; k < WHEEL_SPRAY_POOL_SIZE; k++) {
+      if (_sprayActive[k] === 1) {
+        _sprayLife[k] -= dt;
+        if (_sprayLife[k] <= 0) {
+          _sprayActive[k] = 0;
+          _sprayScale[k] = 0;
+          _sprayScl.set(0, 0, 0);
+          _sprayPos.set(0, -100, 0);
+          _sprayMat4.compose(_sprayPos, _sprayQuat, _sprayScl);
+          _sprayMesh.setMatrixAt(k, _sprayMat4);
+          sprayNeedsUpdate = true;
+          continue;
+        }
+
+        // Fizik simülasyonu: aerodinamik hava direnci + hafif yerçekimi
+        _sprayX[k] += _sprayVx[k] * dt;
+        _sprayY[k] += _sprayVy[k] * dt;
+        _sprayZ[k] += _sprayVz[k] * dt;
+        _sprayVx[k] *= 0.94;
+        _sprayVz[k] *= 0.94;
+        _sprayVy[k] -= 2.5 * dt; // yerçekimi çöküşü
+
+        const progress = 1.0 - (_sprayLife[k] / _sprayMaxLife[k]); // 0 -> 1
+        // Genişleme: su sisi havaya dağılırken hacim kazanır
+        const currentScale = _sprayScale[k] * (0.35 + progress * 1.8);
+        _sprayPos.set(_sprayX[k], Math.max(0.05, _sprayY[k]), _sprayZ[k]);
+        _sprayScl.set(currentScale, currentScale * 0.65, currentScale); // yatay elips şeklinde yayılır
+        _sprayQuat.identity();
+        _sprayMat4.compose(_sprayPos, _sprayQuat, _sprayScl);
+        _sprayMesh.setMatrixAt(k, _sprayMat4);
+
+        // Renk ve opaklık modülasyonu (üstel/yumuşak sönüm: exponential soft fade-out)
+        const softAlpha = Math.exp(-progress * 3.2) * (1.0 - progress);
+        _sprayColor.setRGB(softAlpha * 0.90, softAlpha * 0.93, softAlpha * 1.0);
+        _sprayMesh.setColorAt(k, _sprayColor);
+
+        sprayNeedsUpdate = true;
+      }
+    }
+    if (sprayNeedsUpdate) {
+      _sprayMesh.instanceMatrix.needsUpdate = true;
+      if (_sprayMesh.instanceColor) _sprayMesh.instanceColor.needsUpdate = true;
     }
   }
 

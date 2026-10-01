@@ -33,6 +33,10 @@ let _hornTimer    = null;
 /**
  * AudioContext ve ses boru hattını hazırlar.
  */
+export function getAudioContext() {
+  return _audioCtx;
+}
+
 export function initAudio() {
   if (typeof window === 'undefined') return;
 
@@ -251,15 +255,6 @@ export function playThunder() {
   subOsc.stop(now + 2.2);
 }
 
-/**
- * Ses motorunu sustur veya aç.
- */
-export function toggleMute() {
-  if (!_masterGain) return false;
-  _isMuted = !_isMuted;
-  _masterGain.gain.value = _isMuted ? 0.0 : 0.75;
-  return _isMuted;
-}
 
 /**
  * Islak zeminde yürüme sesi (Prosedürel Web Audio API — Harici dosya yok).
@@ -340,5 +335,73 @@ export function playFootstep(isLeft = false) {
 
   thudOsc.start(now);
   thudOsc.stop(now + 0.040);
+}
+
+/**
+ * Şemsiye silkeleme ses efekti ('R' tuşu).
+ * Gergin su geçirmez kumaş çırpınışı, etrafa saçılan su damlacıklarının fısıltısı
+ * ve metalik gergi tellerinin tok rezonansını prosedürel olarak sentezler.
+ */
+export function playUmbrellaShakeSound() {
+  if (!_audioCtx) return;
+  if (_audioCtx.state === 'suspended') {
+    _audioCtx.resume();
+  }
+  if (_audioCtx.state !== 'running' || _isMuted) return;
+
+  const now = _audioCtx.currentTime;
+  const duration = 0.38; // 380 ms sönümlü titreşim
+
+  // 1. Kumaş Çırpınışı ve Su Savrulması (Flapping Fabric & Water Droplets)
+  const sampleRate = _audioCtx.sampleRate;
+  const frameCount = Math.floor(sampleRate * duration);
+  const noiseBuffer = _audioCtx.createBuffer(1, frameCount, sampleRate);
+  const data = noiseBuffer.getChannelData(0);
+
+  for (let i = 0; i < frameCount; i++) {
+    const t = i / sampleRate;
+    // 26 Hz silkeleme frekansı modülasyonu + üstel sönüm
+    const flutter = (0.5 + 0.5 * Math.sin(t * 26.0 * Math.PI * 2));
+    const envelope = Math.exp(-t * 5.2);
+    data[i] = (Math.random() * 2 - 1) * flutter * envelope;
+  }
+
+  const noiseSrc = _audioCtx.createBufferSource();
+  noiseSrc.buffer = noiseBuffer;
+
+  const bandFilter = _audioCtx.createBiquadFilter();
+  bandFilter.type = 'bandpass';
+  bandFilter.frequency.setValueAtTime(1850, now);
+  bandFilter.frequency.exponentialRampToValueAtTime(950, now + duration);
+  bandFilter.Q.value = 1.8;
+
+  const gain = _audioCtx.createGain();
+  gain.gain.setValueAtTime(0.001, now);
+  gain.gain.linearRampToValueAtTime(0.18, now + 0.025);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+  noiseSrc.connect(bandFilter);
+  bandFilter.connect(gain);
+  gain.connect(_masterGain);
+
+  noiseSrc.start(now);
+  noiseSrc.stop(now + duration);
+
+  // 2. Şemsiye Teli ve Gövdesi Rezonans Titreşimi (Low Rib Flutter Whoosh)
+  const whooshOsc = _audioCtx.createOscillator();
+  whooshOsc.type = 'triangle';
+  whooshOsc.frequency.setValueAtTime(78, now);
+  whooshOsc.frequency.exponentialRampToValueAtTime(32, now + 0.25);
+
+  const whooshGain = _audioCtx.createGain();
+  whooshGain.gain.setValueAtTime(0.001, now);
+  whooshGain.gain.linearRampToValueAtTime(0.09, now + 0.03);
+  whooshGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+
+  whooshOsc.connect(whooshGain);
+  whooshGain.connect(_masterGain);
+
+  whooshOsc.start(now);
+  whooshOsc.stop(now + 0.28);
 }
 

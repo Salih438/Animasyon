@@ -13,14 +13,30 @@
 
 import * as THREE from 'three';
 import { getUmbrellaCollider } from './walker.js';
+import { ROAD_MIN_X, ROAD_MAX_X, SIDEWALK_THICK } from './ground.js';
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CONFIGURATION CONSTANTS
 // ══════════════════════════════════════════════════════════════════════════════
 
-export const RAIN_COUNT = 1200; // İnce parçacıklarla zengin ve akıcı gece yağmuru
+export const RAIN_COUNT = 1600; // Yoğun, sinematik gece fırtınası
+export const FG_RAIN_COUNT = 450; // Kameranın doğrudan ön görüş hacmine tahsis edilmiş ön plan damlaları
 
-// Bounding Box sınırları (Kamera Z=-4.8 ve Walker Z=0 etrafında odaklı)
+// Ön plan odaklı hacim (Kamera X=-4.50m, Z=0m tam önünde net akış)
+const FG_X_MIN = -6.6;
+const FG_X_MAX = -2.4;
+const FG_X_SPAN = FG_X_MAX - FG_X_MIN; // 4.2m genişlik
+
+const FG_Z_MIN = -1.2;
+const FG_Z_MAX =  9.5;
+const FG_Z_SPAN = FG_Z_MAX - FG_Z_MIN; // 10.7m derinlik
+
+const FG_Y_MIN =  0.0;
+const FG_Y_MAX = 14.0;
+const FG_RESPAWN_Y_MIN = 12.0;
+const FG_RESPAWN_Y_MAX = 14.0;
+
+// Genel şehir ortamı Bounding Box sınırları
 const BOX_X_MIN = -16.0;
 const BOX_X_MAX =  16.0;
 const BOX_X_SPAN = BOX_X_MAX - BOX_X_MIN; // 32.0
@@ -31,8 +47,8 @@ const RESPAWN_Y_MIN = 16.0;
 const RESPAWN_Y_MAX = 18.0;
 
 const BOX_Z_MIN = -10.0;
-const BOX_Z_MAX =  45.0;
-const BOX_Z_SPAN = BOX_Z_MAX - BOX_Z_MIN; // 55.0
+const BOX_Z_MAX =  48.0;
+const BOX_Z_SPAN = BOX_Z_MAX - BOX_Z_MIN; // 58.0
 
 // Düşüş hızı parametreleri (unit/s — hızlı dikey akış)
 const SPEED_Y_MIN = 34.0;
@@ -42,10 +58,6 @@ const SPEED_Y_MAX = 48.0;
 const WIND_X = -2.6;
 const WIND_Z = -0.8;
 
-// Kaldırım sınırı (ground.js kaldırım seviyesi)
-const SIDEWALK_X_INNER = 2.4;
-const SIDEWALK_Y_SURF  = 0.140;
-
 // Şemsiye geometrik profil sabitleri
 const UMB_CONE_HEIGHT = 0.220;
 
@@ -53,16 +65,18 @@ const UMB_CONE_HEIGHT = 0.220;
 // MODULE-LEVEL STATE & TYPED ARRAYS (Zero Allocation)
 // ══════════════════════════════════════════════════════════════════════════════
 
-let _pointsMesh  = null;
-let _geometry    = null;
-let _material    = null;
+let _pointsMesh           = null;
+let _geometry             = null;
+let _material             = null;
 
-let _positions   = null; // Float32Array(RAIN_COUNT * 3)
-let _speedY      = null; // Float32Array(RAIN_COUNT)
-let _divertVx    = null; // Float32Array(RAIN_COUNT)
-let _divertVy    = null; // Float32Array(RAIN_COUNT)
-let _divertVz    = null; // Float32Array(RAIN_COUNT)
-let _isDiverted  = null; // Uint8Array(RAIN_COUNT)
+let _positions            = null; // Float32Array(RAIN_COUNT * 3)
+let _colors               = null; // Float32Array(RAIN_COUNT * 3) — dinamik speküler parlaklık
+let _speedY               = null; // Float32Array(RAIN_COUNT)
+let _divertVx             = null; // Float32Array(RAIN_COUNT)
+let _divertVy             = null; // Float32Array(RAIN_COUNT)
+let _divertVz             = null; // Float32Array(RAIN_COUNT)
+let _isDiverted           = null; // Uint8Array(RAIN_COUNT)
+let _rainLightningFactor  = 0.0;
 
 // ─── Zemin Sıçraması (Ground Splash InstancedMesh Havuzu) ───────────────────
 export const SPLASH_POOL_SIZE = 64;
@@ -84,14 +98,14 @@ const _splashColor = new THREE.Color();
 const _splashQuat  = new THREE.Quaternion(); // Identity (düz yere paralel)
 
 /**
- * Donuk kare veya yuvarlak toplar yerine jilet gibi ince, yarı-saydam
- * dikey iğne çizgisi (streak) üreten CanvasTexture.
+ * Yüksek kontrastlı, parlak beyaz çekirdekli ve yumuşak mavi-gümüş haleli
+ * sinematik dikey iğne damlası (streak) üreten CanvasTexture (16x128).
  */
 function _createRainTexture() {
   if (typeof document === 'undefined') return null;
 
-  const width  = 8;
-  const height = 64; // 1:8 en-boy oranı — jilet gibi dikey iğne damlası
+  const width  = 16;
+  const height = 128; // 1:8 dikey en-boy oranı — keskin iğne damlası
 
   const canvas  = document.createElement('canvas');
   canvas.width  = width;
@@ -100,22 +114,37 @@ function _createRainTexture() {
 
   ctx.clearRect(0, 0, width, height);
 
-  // Dikey gradyan: merkezde saf beyaz, uçlarda yumuşak sönüm
+  // Dikey gradyan: üstte yumuşak giriş, merkezde saf beyaz parlaklık, altta keskin su ucu
   const grad = ctx.createLinearGradient(width / 2, 0, width / 2, height);
-  grad.addColorStop(0.00, 'rgba(220, 235, 255, 0.00)');
-  grad.addColorStop(0.20, 'rgba(225, 240, 255, 0.40)');
-  grad.addColorStop(0.50, 'rgba(255, 255, 255, 0.95)');
-  grad.addColorStop(0.80, 'rgba(225, 240, 255, 0.40)');
-  grad.addColorStop(1.00, 'rgba(220, 235, 255, 0.00)');
+  grad.addColorStop(0.00, 'rgba(180, 220, 255, 0.00)');
+  grad.addColorStop(0.12, 'rgba(210, 235, 255, 0.50)');
+  grad.addColorStop(0.50, 'rgba(255, 255, 255, 1.00)');
+  grad.addColorStop(0.85, 'rgba(220, 240, 255, 0.70)');
+  grad.addColorStop(1.00, 'rgba(180, 220, 255, 0.00)');
 
-  ctx.strokeStyle = grad;
-  ctx.lineWidth = 1.4;
+  // 1. Dış yumuşak parlama (Soft Refraction Glow)
+  ctx.strokeStyle = 'rgba(160, 215, 255, 0.35)';
+  ctx.lineWidth = 5.2;
   ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(width / 2, 4);
+  ctx.lineTo(width / 2, height - 4);
+  ctx.stroke();
 
+  // 2. İç jilet gibi saf beyaz çekirdek (Brilliant Core Streak)
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 2.4;
+  ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(width / 2, 2);
   ctx.lineTo(width / 2, height - 2);
   ctx.stroke();
+
+  // 3. Damla ucu mikro su küreciği (Tip Bead)
+  ctx.beginPath();
+  ctx.arc(width / 2, height - 8, 2.0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+  ctx.fill();
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.needsUpdate = true;
@@ -184,20 +213,36 @@ export async function initRain(scene, group, config) {
 
   // Statik Bellek Havuzu (Zero Allocation Altyapısı)
   _positions  = new Float32Array(RAIN_COUNT * 3);
+  _colors     = new Float32Array(RAIN_COUNT * 3);
   _speedY     = new Float32Array(RAIN_COUNT);
   _divertVx   = new Float32Array(RAIN_COUNT);
   _divertVy   = new Float32Array(RAIN_COUNT);
   _divertVz   = new Float32Array(RAIN_COUNT);
   _isDiverted = new Uint8Array(RAIN_COUNT);
 
-  // Damlaları Rain Box İçine Dağıt
+  // Damlaları Rain Box İçine Dağıt (Ön plan odaklı hacim + genel çevre)
   for (let i = 0; i < RAIN_COUNT; i++) {
     const idx = i * 3;
-    _positions[idx]     = BOX_X_MIN + Math.random() * BOX_X_SPAN;
-    _positions[idx + 1] = BOX_Y_MIN + Math.random() * BOX_Y_MAX;
-    _positions[idx + 2] = BOX_Z_MIN + Math.random() * BOX_Z_SPAN;
+    const isFg = (i < FG_RAIN_COUNT);
 
-    _speedY[i]     = SPEED_Y_MIN + Math.random() * (SPEED_Y_MAX - SPEED_Y_MIN);
+    if (isFg) {
+      _positions[idx]     = FG_X_MIN + Math.random() * FG_X_SPAN;
+      _positions[idx + 1] = FG_Y_MIN + Math.random() * FG_Y_MAX;
+      _positions[idx + 2] = FG_Z_MIN + Math.random() * FG_Z_SPAN;
+      _speedY[i]          = SPEED_Y_MIN * 1.05 + Math.random() * (SPEED_Y_MAX - SPEED_Y_MIN);
+      _colors[idx]        = 0.95;
+      _colors[idx + 1]    = 1.05;
+      _colors[idx + 2]    = 1.25;
+    } else {
+      _positions[idx]     = BOX_X_MIN + Math.random() * BOX_X_SPAN;
+      _positions[idx + 1] = BOX_Y_MIN + Math.random() * BOX_Y_MAX;
+      _positions[idx + 2] = BOX_Z_MIN + Math.random() * BOX_Z_SPAN;
+      _speedY[i]          = SPEED_Y_MIN + Math.random() * (SPEED_Y_MAX - SPEED_Y_MIN);
+      _colors[idx]        = 0.60;
+      _colors[idx + 1]    = 0.70;
+      _colors[idx + 2]    = 0.85;
+    }
+
     _divertVx[i]   = 0.0;
     _divertVy[i]   = 0.0;
     _divertVz[i]   = 0.0;
@@ -206,18 +251,19 @@ export async function initRain(scene, group, config) {
 
   _geometry = new THREE.BufferGeometry();
   _geometry.setAttribute('position', new THREE.BufferAttribute(_positions, 3));
+  _geometry.setAttribute('color',    new THREE.BufferAttribute(_colors, 3));
 
   const rainTex = _createRainTexture();
 
-  // İnce, yarı-saydam beyazımsı gri sinematik yağmur materyali
+  // İnce, canlı ve parlak sinematik iğne yağmur materyali (Additive speküler optik)
   _material = new THREE.PointsMaterial({
-    size:            0.10,     // 0.08 - 0.15 spesifikasyonunda ince damlalar
+    size:            0.05,     // İnce dikey çizgi görünümü için küçültüldü (0.26 -> 0.05)
     map:             rainTex,
-    color:           0xddeeff, // İnce beyazımsı gri gece yağmuru
-    opacity:         0.50,     // Yarı-saydam doğal geçirgenlik
+    vertexColors:    true,
+    opacity:         0.40,     // Parlama patlamasını önlemek için düşürüldü (0.88 -> 0.40)
     transparent:     true,
     depthWrite:      false,
-    blending:        THREE.NormalBlending,
+    blending:        THREE.AdditiveBlending, // Sokak lambaları ve farlardan ışık alarak parlar
     sizeAttenuation: true,
   });
 
@@ -245,6 +291,7 @@ export async function initRain(scene, group, config) {
   _splashMesh = new THREE.InstancedMesh(splashGeo, splashMat, SPLASH_POOL_SIZE);
   _splashMesh.name = 'rainSplashes';
   _splashMesh.frustumCulled = false;
+  _splashMesh.renderOrder = 3;
 
   // Başlangıçta tüm instance'ları yerin altına sakla
   _splashPos.set(0, -999, 0);
@@ -286,9 +333,9 @@ export function updateRain(delta, cameraPos) {
 
   const dt = Math.min(delta, 0.1);
 
-  // Karakter şemsiye çarpışma verisi
+  // Karakter şemsiye çarpışma verisi (görünmez ise hasCollider false döner)
   const collider = getUmbrellaCollider ? getUmbrellaCollider() : null;
-  const hasCollider = collider && collider.center && collider.radius > 0;
+  const hasCollider = collider && collider.enabled && collider.center && collider.radius > 0;
 
   const uCenter = hasCollider ? collider.center : null;
   const uRadius = hasCollider ? collider.radius : 0.50;
@@ -298,11 +345,14 @@ export function updateRain(delta, cameraPos) {
   const uRadiusSq = uRadius * uRadius;
 
   const pos       = _positions;
+  const col       = _colors;
   const speedY    = _speedY;
   const divertVx  = _divertVx;
   const divertVy  = _divertVy;
   const divertVz  = _divertVz;
   const isDiverted = _isDiverted;
+
+  const lFactor = _rainLightningFactor * 1.8;
 
   for (let i = 0; i < RAIN_COUNT; i++) {
     const idx = i * 3;
@@ -311,9 +361,11 @@ export function updateRain(delta, cameraPos) {
     let py = pos[idx + 1];
     let pz = pos[idx + 2];
 
-    // 1. Hareket Entegrasyonu (Yerçekimi + Rüzgar + Saptırma Hızları)
+    // 1. Doğru Vektör Entegrasyonu (Tekil dikey hız: saptıysa divertVy, normalde -speedY)
+    const currentVy = (isDiverted[i] === 1) ? divertVy[i] : -speedY[i];
+
     px += (WIND_X + divertVx[i]) * dt;
-    py -= (speedY[i] - divertVy[i]) * dt;
+    py += currentVy * dt;
     pz += (WIND_Z + divertVz[i]) * dt;
 
     // 2. Şemsiye Çarpışma ve Saptırma Mekaniği
@@ -322,37 +374,39 @@ export function updateRain(delta, cameraPos) {
       const dz = pz - uCenter.z;
       const distSq = dx * dx + dz * dz;
 
-      if (distSq < uRadiusSq * 1.25) {
+      if (distSq < uRadiusSq * 1.15) {
         const dist = Math.sqrt(distSq);
         const normR = Math.min(1.0, dist / uRadius);
         const surfaceY = uRimY + (1.0 - normR) * (uApexY - uRimY);
 
-        if (py <= (surfaceY + 0.10) && py >= (uRimY - 0.14)) {
+        if (py <= (surfaceY + 0.08) && py >= (uRimY - 0.12)) {
           const invDist = dist > 0.001 ? (1.0 / dist) : 0.0;
           const nx = dist > 0.001 ? (dx * invDist) : 1.0;
           const nz = dist > 0.001 ? (dz * invDist) : 0.0;
 
-          // Damlayı şemsiyenin dış kenarına it
-          px = uCenter.x + nx * (uRadius + 0.05);
-          pz = uCenter.z + nz * (uRadius + 0.05);
-          py = uRimY - 0.02;
+          // Damlayı şemsiye yüzeyinin dış sınırına ötele
+          px = uCenter.x + nx * (uRadius + 0.04);
+          pz = uCenter.z + nz * (uRadius + 0.04);
+          py = surfaceY + 0.02;
 
-          const scatterSpeed = 3.2 + (i % 5) * 0.5;
+          // Radyal saçılma ve pozitif yukarı sıçrama impulsu ver
+          const scatterSpeed = 3.5 + (i % 5) * 0.4;
           divertVx[i] = nx * scatterSpeed;
           divertVz[i] = nz * scatterSpeed;
-          divertVy[i] = 1.6 + (i % 3) * 0.6;
+          divertVy[i] = 4.2 + (i % 3) * 0.8; // Güçlü pozitif yukarı zıplama
           isDiverted[i] = 1;
         }
       }
     }
 
-    // 3. Sapan Damlaların Sönümlemesi
+    // 3. Sapan damlalara yerçekimi ivmesi ve aerodinamik sönümleme uygula
     if (isDiverted[i] === 1) {
-      divertVx[i] *= 0.90;
-      divertVz[i] *= 0.90;
-      divertVy[i] -= 22.0 * dt;
+      divertVx[i] *= 0.92;
+      divertVz[i] *= 0.92;
+      divertVy[i] -= 32.0 * dt; // Gerçekçi yerçekimi ivmesi (g = 32 m/s²)
 
-      if (py < (uRimY - 0.55)) {
+      // Damla tekrar aşağı yönlü düşüşe geçtiğinde normal serbest düşüşe dön
+      if (divertVy[i] < -speedY[i]) {
         isDiverted[i] = 0;
         divertVx[i]   = 0.0;
         divertVy[i]   = 0.0;
@@ -360,9 +414,9 @@ export function updateRain(delta, cameraPos) {
       }
     }
 
-    // 4. Zemin / Kaldırım Çarpışması & Respawn
-    const isSidewalk = (px < -2.2 || px > 6.8);
-    const groundLimitY = isSidewalk ? 0.145 : 0.00;
+    // 4. Zemin / Kaldırım Çarpışması & Respawn (ground.js ile tam senkron)
+    const isSidewalk = (px < ROAD_MIN_X || px > ROAD_MAX_X);
+    const groundLimitY = isSidewalk ? SIDEWALK_THICK : 0.00;
 
     if (py <= groundLimitY) {
       // Sadece kameraya R <= 18m mesafedeki damlalar için sıçrama oluştur
@@ -374,9 +428,15 @@ export function updateRain(delta, cameraPos) {
         spawnSplash(px, groundLimitY + 0.006, pz, 0.75 + Math.random() * 0.40, 0.18 + Math.random() * 0.05);
       }
 
-      py = RESPAWN_Y_MIN + Math.random() * (RESPAWN_Y_MAX - RESPAWN_Y_MIN);
-      px = BOX_X_MIN + Math.random() * BOX_X_SPAN;
-      pz = BOX_Z_MIN + Math.random() * BOX_Z_SPAN;
+      if (i < FG_RAIN_COUNT) {
+        py = FG_RESPAWN_Y_MIN + Math.random() * (FG_RESPAWN_Y_MAX - FG_RESPAWN_Y_MIN);
+        px = FG_X_MIN + Math.random() * FG_X_SPAN;
+        pz = FG_Z_MIN + Math.random() * FG_Z_SPAN;
+      } else {
+        py = RESPAWN_Y_MIN + Math.random() * (RESPAWN_Y_MAX - RESPAWN_Y_MIN);
+        px = BOX_X_MIN + Math.random() * BOX_X_SPAN;
+        pz = BOX_Z_MIN + Math.random() * BOX_Z_SPAN;
+      }
 
       isDiverted[i] = 0;
       divertVx[i]   = 0.0;
@@ -385,20 +445,39 @@ export function updateRain(delta, cameraPos) {
     }
 
     // 5. Kutu Taşma Sarması
-    if (px < BOX_X_MIN) px += BOX_X_SPAN;
-    else if (px > BOX_X_MAX) px -= BOX_X_SPAN;
+    if (i < FG_RAIN_COUNT) {
+      if (px < FG_X_MIN) px += FG_X_SPAN;
+      else if (px > FG_X_MAX) px -= FG_X_SPAN;
 
-    if (pz < BOX_Z_MIN) pz += BOX_Z_SPAN;
-    else if (pz > BOX_Z_MAX) pz -= BOX_Z_SPAN;
+      if (pz < FG_Z_MIN) pz += FG_Z_SPAN;
+      else if (pz > FG_Z_MAX) pz -= FG_Z_SPAN;
+    } else {
+      if (px < BOX_X_MIN) px += BOX_X_SPAN;
+      else if (px > BOX_X_MAX) px -= BOX_X_SPAN;
+
+      if (pz < BOX_Z_MIN) pz += BOX_Z_SPAN;
+      else if (pz > BOX_Z_MAX) pz -= BOX_Z_SPAN;
+    }
 
     pos[idx]     = px;
     pos[idx + 1] = py;
     pos[idx + 2] = pz;
+
+    // 6. Kamera Önü Speküler Parlaklık Hesaplaması (Zero-allocation TypedArray write)
+    const isCloseToCam = (pz >= -1.0 && pz <= 8.5 && px >= -6.8 && px <= -2.2);
+    const boost = isCloseToCam ? 1.45 : 1.0;
+
+    col[idx]     = Math.min(2.5, (isCloseToCam ? 0.90 : 0.55) * boost + lFactor);
+    col[idx + 1] = Math.min(2.5, (isCloseToCam ? 1.02 : 0.65) * boost + lFactor);
+    col[idx + 2] = Math.min(2.5, (isCloseToCam ? 1.25 : 0.80) * boost + lFactor * 1.2);
   }
 
   _geometry.attributes.position.needsUpdate = true;
+  if (_geometry.attributes.color) {
+    _geometry.attributes.color.needsUpdate = true;
+  }
 
-  // ── 6. Aktif Zemin Sıçramalarının Yaşam Döngüsü ve Animasyonu ─────────────
+  // ── 7. Aktif Zemin Sıçramalarının Yaşam Döngüsü ve Animasyonu ─────────────
   if (_splashMesh) {
     let needsSplashUpdate = false;
     for (let k = 0; k < SPLASH_POOL_SIZE; k++) {
@@ -440,8 +519,9 @@ export function updateRain(delta, cameraPos) {
  * Şimşek çaktığında damlaların aydınlanmasını sağlar.
  */
 export function setRainLightningFactor(factor) {
+  _rainLightningFactor = factor;
   if (_material) {
-    _material.opacity = 0.50 + factor * 0.35; // 0.50 -> 0.85
+    _material.opacity = Math.min(0.40, 0.25 + factor * 0.15); // Maksimum 0.40 ile patlamayı önle
   }
 }
 
@@ -454,8 +534,9 @@ export function setRainLightningFactor(factor) {
  */
 export function onResizeRain(width, height) {
   if (!_material) return;
-  const scale = Math.max(0.65, Math.min(1.45, height / 1080));
-  _material.size = 0.10 * scale;
+  const scale = Math.max(0.75, Math.min(1.40, height / 1080));
+  _material.size = 0.05 * scale;
   _material.needsUpdate = true;
 }
+
 

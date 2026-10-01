@@ -1,0 +1,15 @@
+{
+  "name": "animasyon_odevi",
+  "version": "1.0.0",
+  "description": "Three.js Rainy Night Animation",
+  "main": "main.js",
+  "scripts": {
+    "start": "http-server -c-1 --port 8080"
+  },
+  "dependencies": {
+    "three": "^0.165.0"
+  },
+  "devDependencies": {
+    "http-server": "^14.1.1"
+  }
+}

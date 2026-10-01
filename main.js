@@ -20,16 +20,22 @@
 
 import * as THREE from 'three';
 
+if (typeof window !== 'undefined') {
+  window.THREE = THREE;
+}
+
 // ─── Scene modules (Phase 2+ doldurulacak) ──────────────────────────────────
-import { initWorld,   updateWorld   } from './scene/world.js';
+import { initSky } from './scene/sky.js';
+import { initWorld,   updateWorld   } from './scene/world/index.js';
 import { initGround,  updateGround, onResizeGround  } from './scene/ground.js';
-import { initWalker,  updateWalker  } from './scene/walker.js';
+import { initWalker,  updateWalker, getUmbrellaInertiaData, setUmbrellaVisible, triggerUmbrellaShake, setWalkerTurnInput, getWalkerData } from './scene/walker.js';
 import { initRain,    updateRain, onResizeRain } from './scene/rain.js';
 import { initLighting, updateLighting, triggerLightning } from './scene/lighting.js';
 import { initTraffic,  updateTraffic  } from './scene/traffic.js';
 import { initPostprocessing, renderPostprocessing, onResizePostprocessing } from './scene/postprocessing.js';
-import { initAudio, startAudio, playFootstep } from './scene/audio.js';
+import { initAudio, startAudio, playUmbrellaShakeSound, getAudioContext } from './scene/audio.js';
 import { initShadows, updateShadows } from './scene/shadows.js';
+import { RIGHT_SW_X, SIDEWALK_WIDTH, ROAD_CENTER_X } from './scene/ground.js';
 
 // ─── Central Configuration ──────────────────────────────────────────────────
 export const CONFIG = Object.freeze({
@@ -39,16 +45,16 @@ export const CONFIG = Object.freeze({
     fov:      54,       // Sinematik geniş açı
     near:     0.1,
     far:      4000,
-    // Geniş kaldırımın tam ortasında (baseX = -4.50m: bordürden 1.8m, binalardan 3.3m ferah mesafe)
-    baseX:   -4.50,
+    // Sağ kaldırım üzerinde, binalar ve cadde arasında dengeli yürüyüş hattı
+    baseX:   RIGHT_SW_X + (SIDEWALK_WIDTH * 0.24),
     baseY:    1.78,
     baseZ:    0.00,
-    lookAt:   { x: -3.20, y: 1.55, z: 120.0 }, // Kaldırım ve cadde perspektifine doğal bakış
+    lookAt:   { x: ROAD_CENTER_X - 1.2, y: 1.55, z: 120.0 }, // Cadde perspektifine doğal bakış
   },
 
   /** Karakter & Viewmodel */
   walker: {
-    showUmbrella: false, // Ekranı bölen veya görüşü kapatan yapay mesh'leri önler
+    showUmbrella: true, // Şemsiye onarıldı, varsayılan olarak görünür
   },
 
   /** Renderer */
@@ -156,6 +162,9 @@ function initScene() {
     CONFIG.atmosphere.fogColor,
     CONFIG.atmosphere.fogDensity
   );
+  
+  // Faz 8: SkyDome (scene/sky.js)
+  initSky(scene);
 
   if (typeof window !== 'undefined') {
     window.__scene = scene;
@@ -273,64 +282,14 @@ function onResize() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-//  UPDATE — Delta-time tabanlı, frame-rate bağımsız & Head-Bobbing
+//  UPDATE — Delta-time tabanlı modül orkestrasyonu
 // ════════════════════════════════════════════════════════════════════════════
 
-let _walkTime = 0;
-let _keyTurnLeft = false;
-let _keyTurnRight = false;
-let _headYaw = 0.0; // Anlık kafa dönüş açısı (radyan)
-let _stepLanded = false; // Adım sesi debounce bayrağı
-let _footstepIsLeft = false; // Sol/sağ ayak durumu
-
 function update(delta) {
-  // ── 1. Etkileşimli Sağa/Sola Bakış (Interactive Head Turn — Lerp Damping) ──
-  // Sol tuş (ArrowLeft / A): Caddeye, yanımızdan geçen arabalara bakış (+32° ≈ +0.55 rad)
-  // Sağ tuş (ArrowRight / D): Binalara, neonlara ve ara sokaklara bakış (-32° ≈ -0.55 rad)
-  const targetYaw = _keyTurnLeft ? 0.55 : (_keyTurnRight ? -0.55 : 0.0);
-  _headYaw = THREE.MathUtils.lerp(_headYaw, targetYaw, 1.0 - Math.exp(-8.5 * delta));
-
-  // ── 2. First-Person Camera Head-Bobbing & Stride Dynamics ─────────────────
-  _walkTime += delta * 3.8;
-
-  // Dikey adım yaylanması:
-  camera.position.y = CONFIG.camera.baseY + Math.sin(_walkTime * 2) * 0.045;
-
-  // Yatay adım ağırlık salınımı:
-  camera.position.x = CONFIG.camera.baseX + Math.sin(_walkTime) * 0.025;
-  camera.position.z = CONFIG.camera.baseZ;
-
-  // ── 2b. Islak Adım Sesi (Procedural Footstep Audio Sync) ───────────────────
-  // Dikey yaylanmanın çukur noktasında (adım basış anı) tetiklenir
-  const stridePhase = Math.sin(_walkTime * 2);
-  if (stridePhase < -0.92 && !_stepLanded) {
-    _footstepIsLeft = !_footstepIsLeft;
-    playFootstep(_footstepIsLeft);
-    _stepLanded = true;
-  } else if (stridePhase > -0.20) {
-    _stepLanded = false;
-  }
-
-  // ── 3. Bakış Yönü + Kafa Dönüşü (CONFIG.camera.lookAt referanslı) ───────────
-  // lookAt.x (-1.00 m) caddenin ufuk kaçış noktasıdır (kaldırımdan hafifçe yola doğru doğal odaklanma)
-  const baseTargetX = CONFIG.camera.lookAt.x;
-  const baseTargetY = CONFIG.camera.lookAt.y;
-  const lookDist    = CONFIG.camera.lookAt.z; // 120.0 m
-
-  // Kafa dönüşü (yaw), baz kaçış eksenine göre açılı sapmayı belirler
-  const lookX = baseTargetX + Math.sin(_headYaw) * lookDist;
-  const lookY = baseTargetY;
-  const lookZ = camera.position.z + Math.cos(_headYaw) * lookDist;
-
-  camera.lookAt(lookX, lookY, lookZ);
-
-  // Adım eğimi (tilt roll — Euler tekilliğini önlemek için yerel quaternion rotateZ):
-  camera.rotateZ(Math.sin(_walkTime) * 0.01);
-
   // ── Modül Güncellemeleri ───────────────────────────────────────────────────
   updateWorld(delta);
   updateGround(delta);
-  updateWalker(delta, camera, _headYaw);
+  updateWalker(delta, camera);
   updateRain(delta, camera?.position);
   updateLighting(delta, camera?.position);
   updateTraffic(delta);
@@ -392,29 +351,83 @@ async function main() {
 
   if (typeof window !== 'undefined') {
     window.__camera = camera;
+    window.__renderer = renderer;
     window.__triggerLightning = triggerLightning;
+    window.__getUmbrellaInertiaData = getUmbrellaInertiaData;
+    window.__setUmbrellaVisible = setUmbrellaVisible;
+    window.__triggerUmbrellaShake = triggerUmbrellaShake;
+    window.__getWalkerData = getWalkerData;
   }
 
   // 5. Pencere boyutlandırma dinleyicisi (Resize)
   window.addEventListener('resize', onResize);
 
   // 6. Şimşek Etkileşimi, Sağa/Sola Bakış & Ses Motoru Dinleyicileri
+  let _audioStarted = false;
+  let _keyTurnLeft = false;
+  let _keyTurnRight = false;
+  const overlayEl = document.getElementById('overlay');
+
+  function syncKeyTurn() {
+    setWalkerTurnInput(_keyTurnLeft, _keyTurnRight);
+  }
+
+  function triggerAudioStart() {
+    if (!_audioStarted) {
+      startAudio();
+      _audioStarted = true;
+      if (overlayEl) {
+        overlayEl.textContent = '← / A: CADDEYE BAK | → / D: BİNALARA BAK | BOŞLUK: ŞİMŞEK | R: ŞEMSİYE';
+      }
+    }
+  }
+
+  // Tıklama yalnızca ses motorunu başlatır; istem dışı kör edici şimşek patlamalarını önler
   window.addEventListener('pointerdown', () => {
-    startAudio();
-    triggerLightning();
+    triggerAudioStart();
   });
+
   window.addEventListener('keydown', (e) => {
-    startAudio();
-    if (e.code === 'ArrowLeft'  || e.code === 'KeyA') _keyTurnLeft  = true;
-    if (e.code === 'ArrowRight' || e.code === 'KeyD') _keyTurnRight = true;
+    triggerAudioStart();
+    if (e.code === 'ArrowLeft'  || e.code === 'KeyA') { _keyTurnLeft  = true; syncKeyTurn(); }
+    if (e.code === 'ArrowRight' || e.code === 'KeyD') { _keyTurnRight = true; syncKeyTurn(); }
     if (e.code === 'Space') {
       e.preventDefault();
       triggerLightning();
     }
+    if (e.code === 'KeyR') {
+      triggerUmbrellaShake();
+      playUmbrellaShakeSound();
+    }
   });
   window.addEventListener('keyup', (e) => {
-    if (e.code === 'ArrowLeft'  || e.code === 'KeyA') _keyTurnLeft  = false;
-    if (e.code === 'ArrowRight' || e.code === 'KeyD') _keyTurnRight = false;
+    if (e.code === 'ArrowLeft'  || e.code === 'KeyA') { _keyTurnLeft  = false; syncKeyTurn(); }
+    if (e.code === 'ArrowRight' || e.code === 'KeyD') { _keyTurnRight = false; syncKeyTurn(); }
+  });
+
+  // Ekran görüntüsü alınırken veya sekme değişirken tuşların takılı kalmasını önler
+  window.addEventListener('blur', () => {
+    _keyTurnLeft  = false;
+    _keyTurnRight = false;
+    syncKeyTurn();
+  });
+
+  window.addEventListener('contextmenu', () => {
+    _keyTurnLeft  = false;
+    _keyTurnRight = false;
+    syncKeyTurn();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    const ctx = getAudioContext();
+    if (document.hidden) {
+      _keyTurnLeft  = false;
+      _keyTurnRight = false;
+      syncKeyTurn();
+      if (ctx && ctx.state === 'running') ctx.suspend();
+    } else {
+      if (ctx && ctx.state === 'suspended') ctx.resume();
+    }
   });
 
   // 7. Loading ekranını gizle

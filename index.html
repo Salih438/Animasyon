@@ -45,10 +45,24 @@
       right: 18px;
       font-size: 10px;
       letter-spacing: 2px;
-      color: rgba(120, 140, 210, 0.30);
+      color: rgba(180, 205, 255, 0.70);
+      text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
       pointer-events: none;
       user-select: none;
       text-transform: uppercase;
+      z-index: 50;
+      transition: color 0.3s ease;
+    }
+
+    @media (max-width: 900px) {
+      #overlay {
+        font-size: 9px;
+        letter-spacing: 1px;
+        right: 10px;
+        bottom: 10px;
+        max-width: calc(100vw - 20px);
+        text-align: right;
+      }
     }
 
     /* ── Loading screen (Phase 1 sadece bir frame görünür) ─────────────── */

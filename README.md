@@ -3,11 +3,13 @@
 [![Three.js](https://img.shields.io/badge/Three.js-r165-black?style=flat-square&logo=three.js)](https://threejs.org/)
 [![WebGL](https://img.shields.io/badge/WebGL-2.0-red?style=flat-square&logo=webgl)](https://www.khronos.org/webgl/)
 [![Web Audio API](https://img.shields.io/badge/Web_Audio-Procedural_Sound-purple?style=flat-square)](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API)
+[![HDR Pipeline](https://img.shields.io/badge/HDR-HalfFloatType_16bit-blue?style=flat-square)](https://threejs.org/)
 [![Performance](https://img.shields.io/badge/Target_FPS-60_Locked-success?style=flat-square)](https://github.com/)
+[![Memory Allocation](https://img.shields.io/badge/GC_Pressure-0_Byte%2FFrame-brightgreen?style=flat-square)](https://github.com/)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 > **"From 2D Canvas Projection to an Atmospheric, Living, Production-Grade 3D WebGL Boulevard."**  
-> Bu çalışma; p5.js ile yazılmış 2D matematiksel izdüşümlü bir yağmurlu gece sahnesinin, sıfırdan modern WebGL (Three.js r165) grafik boru hattına dönüştürülmesini, fiziksel ve optik doğruluğunu, prosedürel Web Audio API ses sentezini ve sıfır-tahsisli (zero-allocation) 60 FPS kilitli gerçek zamanlı mühendislik mimarisini belgeleyen üst düzey bir teknik vaka analizidir (Case Study).
+> Bu çalışma; p5.js ile yazılmış 2D matematiksel izdüşümlü bir yağmurlu gece sahnesinin, modern WebGL (Three.js r165) grafik boru hattına dönüştürülmesini, asimetrik First-Person POV yürüyüş biyomekaniğini, şemsiye kütle atalet fiziğini, 16-bit HDR post-processing optiklerini, prosedürel Web Audio API ses motorunu ve sıfır-tahsisli (zero-allocation) 60 FPS kilitli mühendislik mimarisini belgeleyen kapsamlı bir teknik vaka analizidir (Case Study).
 
 ---
 
@@ -17,149 +19,138 @@
 | :---: | :---: | :---: |
 | ![Düz İleri Bakış — Ferah Kaldırım & Islak Asfalt](docs/screenshots/01-forward.png) | ![Sola Bakış — Yoğun Cadde Trafiği & Şehir Silüeti](docs/screenshots/02-turn-left.png) | ![Sağa Bakış — Kesintisiz Bina Cepheleri & Butik Vitrinler](docs/screenshots/03-turn-right.png) |
 
-> **Canlı Render Notu:** Yukarıdaki kareler Three.js WebGL motorundan doğrudan 1920x1080 çözünürlükte, ACESFilmic ton eşleme ve UnrealBloom lens parlamaları eşliğinde canlı olarak kaydedilmiştir. Ekranı kapatan yapay engeller kaldırılmış; ferah 4.60m kaldırım, yüksek yoğunluklu mimari pencereler ve kesintisiz cadde cepheleri sergilenmektedir.
+| 4. Biyomekanik Şemsiye Ataleti (Lag Angle) | 5. Fırtına Şimşeği & Bulut Işıması |
+| :---: | :---: |
+| ![Şemsiye Kütle Ataleti ve Gecikme Açısı](docs/screenshots/diag_umbrella_inertia.png) | ![Fırtına Şimşeği & Volumetrik Bulut](docs/screenshots/diag_storm_lightning.png) |
 
-### 🎮 Etkileşim Kontrolleri
-* **Sol Yön Tuşu (`ArrowLeft` / `A`):** Başımızı sola, ana caddeye, yanımızdan geçen araçlara ve karşı kaldırıma çevirir (hedef yaw: $+31.5^\circ \approx +0.55\text{ rad}$).
-* **Sağ Yön Tuşu (`ArrowRight` / `D`):** Başımızı sağa, binaların cephelerine, neon tabelalara ve ara sokaklara çevirir (hedef yaw: $-31.5^\circ \approx -0.55\text{ rad}$).
-* **Tuş Bırakıldığında (Smooth Return):** Kamera exponential damping sönümlemesiyle ($1 - e^{-8.5\Delta t}$) yumuşakça ileriye ($0^\circ$) döner.
-* **Fare Sol Tık (Mouse Click / Pointer Down):** Web Audio API ses motorunu başlatır ve anlık çift darbeli şimşek patlamasıyla birlikte derin gök gürültüsü sesini (`Thunder Rumble`) tetikler.
-* **Boşluk Tuşu (Spacebar):** Gökyüzünde stokastik çift darbeli şimşek akımı ve gök gürültüsü deşarjı yaratır.
-* **Pencere Boyutlandırma (Responsive Resize):** Reflector render target'ı, kamera projeksiyon matrisi ve post-processing composer katmanları tam senkronize güncellenir.
+> **Canlı Render Notu:** Yukarıdaki kareler Three.js WebGL motorundan doğrudan 1920x1080 çözünürlükte, 16-bit HalfFloatType HDR boru hattı, ACESFilmic ton eşleme ve UnrealBloom lens difüzyonu eşliğinde canlı olarak kaydedilmiştir.
 
 ---
 
-## 🏛️ Mimari ve Mühendislik Vurguları (Key Engineering Highlights)
+## 🎮 Güncel Kullanıcı Kontrolleri
 
-### 1. First-Person POV ("ADAM BİZİZ") & Biyomekanik Head-Bobbing
-* **Kamera Kompozisyonu:** Karakter yolun ortasından alınarak güvenle **sağ kaldırıma** yerleştirilmiştir. Kamera insan göz hizasında (`baseY = 1.78 m`) ve genişletilmiş sağ kaldırım merkezinde (`baseX = -4.50 m`) konumlandırılmış; cadde kaçış noktasına (`lookAt: { x: -1.00, y: 1.55, z: 120.0 }`) odaklanmıştır.
-* **Biyomekanik Adım Dinamiği (Camera Stride Oscillators):**
-  $$\text{camera.position.y}(t) = 1.78 + \sin(2 \cdot \omega t) \cdot 0.045$$
-  $$\text{camera.position.x}(t) = -4.50 + \sin(\omega t) \cdot 0.025$$
-  $$\text{camera.position.z}(t) = 0.00$$
-  $$\text{camera.rotateZ}(t) = \sin(\omega t) \cdot 0.01$$
-  *(Adım frekansı $\omega = 3.8\text{ rad/s}$; Euler tekilliğini önlemek için yerel quaternion `rotateZ` kullanılmıştır).*
-* **Etkileşimli Kafa Dönüşü (Interactive Head Turn):**
-  $$\text{targetYaw} = \begin{cases} +0.55\text{ rad } (+31.5^\circ) & \text{ArrowLeft / A (Caddeye bakış)} \\ -0.55\text{ rad } (-31.5^\circ) & \text{ArrowRight / D (Binalara bakış)} \\ 0.00\text{ rad } (0^\circ) & \text{Serbest (İleriye bakış)} \end{cases}$$
-  $$\text{headYaw} = \text{lerp}(\text{headYaw}, \text{targetYaw}, 1 - e^{-8.5 \cdot \Delta t})$$
-* **FPS Viewmodel Şemsiye:** Kameraya doğrudan bağlanabilir (`camera.add(_fpsGroup)`), 16 dilimli koni kubbe (`radius: 0.72 m, height: 0.22 m`), çelik iç teller, metalik baston şaftı ve sağ alt köşede ergonomik J-kulp (`CONFIG.walker.showUmbrella` bayrağı ile dinamik olarak açılıp kapatılabilir; varsayılan olarak kesintisiz ferah sinematik manzara için gizlenmiştir). Kafa sağa veya sola döndüğünde şemsiye kolun doğal ataletini simüle eden karşı-salınımlı sönümleme sergiler:
-  $$\text{fpsGroup.rotation.y} = \text{BASE\_ROT.y} - \text{headYaw} \times 0.22$$
-  $$\text{fpsGroup.position.x} = \text{BASE\_POS.x} + \sin(\text{lagTime}) \cdot 0.010 - \text{headYaw} \times 0.035$$
+Arayüz ve etkileşim mantığı, oyuncunun sinematik film noir atmosferine odaklanmasını sağlayacak şekilde optimize edilmiştir:
 
-### 2. İğne Yağmur Sistemi, Zemin Sıçramaları (Splash) & Lens Kırılması
-* **İnce Yağmur Çizgileri:** Donuk kare veya dev yuvarlak toplar yerine 1:8 en-boy oranlı ($8 \times 64\text{ px}$ CanvasTexture), jilet inceliğinde yarı saydam (`size: 0.10, color: 0xddeeff, opacity: 0.50`) **1200 damla** üretilmiştir.
-* **Düşüş Dinamiği:** 34.0 - 48.0 m/s yüksek düşüş hızı ve rüzgar eğimi (`windX: -2.6, windZ: -0.8`) ile havada asılı kalma hissi tamamen ortadan kaldırılmıştır.
-* **Zemin Su Sıçramaları (Ground Splash Particle Pool):**
-  * Zemine veya kaldırıma ($y \le 0.0$ / $y \le 0.145\text{ m}$) çarpan damlalar anında yok olmak yerine 64 instance'lık `InstancedMesh` (`_splashMesh`) havuzundan boş bir sıçrama halkası tetikler.
-  * Halka ~200ms içinde dışa doğru genişler ($0.22 \to 1.35\times$) ve Additive Blending ile söner.
-  * GPU yükünü minimumda tutmak için yalnızca kameraya $R \le 18\text{ m}$ menzildeki damlalar için sıçrama oluşturulur (O(1) ring-buffer, sıfır GC tahsisi).
-* **Araç Tekerlek Su Sıçratması (Tire Spray):** Yakın şeritte geçen araçların arka tekerlek hizasında mikro su sıçramaları tetiklenir.
-* **Kamera Lensi Yağmur Damlası Pass'i (Post-Process Lens Rain):**
-  * `postprocessing.js` içine entegre edilen tam ekran `RainLensShader` ile kamera lensine düşen seyrek su damlacıkları ve arka plandaki şehir ışıklarını optik olarak kıran (refraction) zarif lens efekti.
-  * Görüşü kapatmayacak incelikte ve ayarlanabilir yoğunluktadır (`POST_CONFIG.lensRain.intensity: 0.35`).
-* **Raycaster Maliyetsiz Analitik Saptırma:** Şemsiye kubbesi analitik bir koni olarak modellenmiştir:
-  $$\Delta X^2 + \Delta Z^2 \le R(y)^2 \quad \text{ve} \quad Y_{\text{rim}} \le y \le Y_{\text{apex}}$$
-  Şemsiye yüzeyine çarpan damlalar radyal fışkırma vektörü ($V_{\text{scatter}} \approx 3.5\text{ m/s}$) ve yukarı sıçrama darbesi alarak eteklerden aşağı süzülür.
-
-### 3. Yüksek Kontrastlı Yol, Granit Bordürler ve Islak Asfalt Yansıtıcısı
-* **Yol ve Kaldırım Sınırları:**
-  * Ana Cadde: $X \in [-2.20\text{ m}, +6.80\text{ m}]$ ($9.00\text{ m}$ genişlik, $3000\text{ m}$ uzunluk).
-  * Sağ Kaldırım (Yürüdüğümüz taraf): $X = -4.50\text{ m}$ merkezli ($4.60\text{ m}$ genişlik, $0.15\text{ m}$ yükseklik; kamera $X = -4.50\text{ m}$'de yürür).
-  * Sağ Bordür Taşı: $X = -2.20\text{ m}$ merkezli ($0.35\text{ m}$ genişlik, $0.26\text{ m}$ yükseklik — asfalttan $26\text{ cm}$, kaldırımdan $11\text{ cm}$ yüksek, ıslak granit `0x3a3f50`).
-  * Karşı Sol Bordür & Kaldırım: $X = 6.37\text{ m}$ ve $X = 8.05\text{ m}$.
-* **Koyu Zift Asfaltı:** Derin siyah kontrast (`color: 0x090b10, roughness: 0.18, metalness: 0.28`).
-* **Yol Çizgileri (Road Markings):**
-  * **Sarı Kesik Orta Şerit:** Yolun tam ortasında ($X = +1.825\text{ m}$), $7.0\text{ m}$ periyotlu ($3.2\text{ m}$ boya + $3.8\text{ m}$ boşluk) 3D kabartma `InstancedMesh` (`color: 0xffcc00, emissive: 0xff9900, emissiveIntensity: 1.80`).
-  * **Beyaz Kenar Şeritleri:** Sağ bordür dibi ($X = -2.37\text{ m}$) ve sol bordür dibi ($X = +6.02\text{ m}$) kesintisiz güvenlik çizgileri (`color: 0xffffff, emissiveIntensity: 1.10`).
-  * **Yaya Geçidi (Zebra Crossing):** Başlangıçta hemen önümüzde ($Z = 14.0\text{ m}$) yer alan 8 bloklu reflektif yaya geçidi.
-* **Planar Reflector & Su Birikintisi Optiği:** Yansıma düzlemi yalnızca asfalt koridorunda ($Y = 0.001\text{ m}$) çalışır. Tekerlek izi ve su birikintisi dokusu (`CanvasTexture`), geçen araçların ve sokak lambalarının yansımalarını dikey eksende zarifçe kırarak sinematik ışık şeritlerine dönüştürür (`uBlendFactor: 0.28`).
-
-### 4. Yaşayan Şehir: Anisotropik Mimari Cepheler, Butik Vitrinler ve 3D Neon Tabelalar
-* **Kesintisiz Şehir Silüeti & 16x Anisotropic Filtering:** 48 bina (24 Sol + 24 Sağ), $Z = -45\text{ m}$'den ufka kadar uzanır. Prosedürel $1024 \times 2048$ yüksek çözünürlüklü mimari doku, $24 \times 36$ pencere matrisi, döküm demir vitrin çerçeveleri, pirinç kapı kolları ve taş silmelerle işlenmiştir. `Math.min(16, renderer.capabilities.getMaxAnisotropy())` ile teğet (grazing) açılarda sıfır bulanıklıkla jilet gibi netlik sağlanır.
-* **Hem Map Hem EmissiveMap Entegrasyonu:** Binalar gündüz/gece her türlü ortam ışığında taş dokusunu sergilerken, pencereler emissiveMap üzerinden bağımsız olarak aydınlatılır ve şimşek anında aşırı parlayıp patlamadan (`0.28 \to 1.60`) canlı flaş etkisi üretir.
-* **Ara Sokak Geçişleri (Cross Alleys):** Sağ tarafımızda binalar belirli aralıklarla kesilerek içeriye doğru uzanan 3 derin ara sokak açılmıştır ($Z = 42.0\text{ m}, 118.0\text{ m}, 205.0\text{ m}$). Sokak ağızlarında tuğla yan duvarlar, zemin taşları ve sıcak amber köşe fenerleri (`0xff8822`, $1.4\text{ cd}$ PointLight) yer alır.
-* **Gizemli Noir Yayalar (Pedestrians):** Şehrin terk edilmişlik hissini kıran 4 adet low-poly fötr şapkalı, uzun paltolu ve şemsiyeli noir silüet:
-  * Karşı sol kaldırımda karşıdan gelen yaya ($X = 7.8\text{ m}, Z = 42.0\text{ m}$, yürüme hızı $-1.3\text{ m/s}$).
-  * Karşı sol kaldırımda uzaklaşan yaya ($X = 8.3\text{ m}, Z = 86.0\text{ m}$, yürüme hızı $+1.1\text{ m/s}$).
-  * Sağ 1. ara sokak köşesinde yağmurdan sığınan yaya ($X = -5.65\text{ m}, Z = 34.0\text{ m}$, duraklama nefes animasyonu).
-  * Sağ 2. ara sokak ağzında bekleyen gizemli figür ($X = -6.40\text{ m}, Z = 104.0\text{ m}$).
-* **12 Adet 3D Parlayan Neon Tabela:** "HOTEL", "BAR", "DINER", "NOIR", "CINEMA", "JAZZ CLUB", "CAFE", "PHARMACY", "MOTEL" tabelaları canlı camgöbeği, sıcak amber, kor kırmızısı, zümrüt yeşili ve elektrik moru emissive katsayılarıyla (`emissiveIntensity: 3.2`) binadan yola sarkar. UnrealBloomPass ile yumuşak lens parlamasına dönüşür.
-
-### 5. Yoğun Şehir Trafiği & Göreli Hız Fiziği
-* **Toplam 12 Araçlık Filo:** 3 kasa tipi (Sedan, Hatchback, SUV) ve 12 zengin gece metalik rengi.
-* **Aynı Yön Şeridi (Outgoing):** $X = -0.45\text{ m}$ şeridinde kameranın $3.35\text{ m}$ solundan ileriye doğru uzaklaşan araçlar (içsel hız: $16 - 22\text{ m/s}$, bağıl hız: $V_{\text{rel}} \approx +13.2 \text{ ile } +19.2\text{ m/s}$). Kor kırmızısı stop lambaları (`emissiveIntensity: 3.8`).
-* **Karşı Şerit (Incoming):** $X = 3.90\text{ m}$ karşı sol şeritte kameraya doğru hızla yaklaşan araçlar (içsel hız: $18 - 24\text{ m/s}$, bağıl hız: $V_{\text{rel}} \approx -20.8 \text{ ile } -26.8\text{ m/s}$). Sıcak beyaz ön farlar (`emissiveIntensity: 3.4`).
-* **Sürekli Akış:** Araçlar kameranın arkasında ($Z = -35\text{ m}$) ve ufukta ($Z = 340\text{ m}$) sürekli döngüye sokulur.
-
-### 6. Saf Web Audio API Prosedürel Ses Motoru (Zero External Files)
-* **Sürekli Yağmur Sesi:** Pembe ve beyaz gürültü sentezleyicisi (Pink Noise) + Lowpass BiquadFilter (750 Hz) + LFO rüzgar esintisi modülasyonu (600 - 900 Hz).
-* **Uzak Araba Kornaları:** Rastgele aralıklarla tetiklenen çift-tonlu osilatör çiftleri (392Hz + 440Hz / 415Hz + 466Hz) ve uzaklık filtrelemesi.
-* **Derin Gök Gürültüsü (Thunder Rumble):** Şimşek anında senkron olarak devreye giren 45 Hz sub-bass sinüs vuruşu ve 110 Hz yuvarlanan gürültü patlaması (3.5s üstel sönüm).
-* **Otomatik İzin Çözümü:** Kullanıcının sayfaya ilk tıklamasıyla `AudioContext.resume()` çağrılır ve ses motoru başlar.
-
-### 7. Dinamik Işık Havuzu (Light Pooling) ve Sokak Lambaları
-* **16 Sokak Lambası:** Sağ bordür ($X = -2.75\text{ m}$) ve sol bordür ($X = 6.35\text{ m}$) üzerinde, $Z = 2, 16, 32, 50, 72, 100, 135, 180\text{ m}$ pozisyonlarında yer alır. Üst kollar yola doğru uzanır; ampuller $Y = 5.25\text{ m}$ kotundadır (`emissiveIntensity: 3.8`).
-* **Dinamik 4-PointLight Havuzu:** GPU forward rendering sınırlarını korumak için kameraya en yakın 4 aktif lamba sıfır heap tahsisiyle dinamik olarak seçilir (`intensity: 2.20, distance: 40.0 m, decay: 2.0, color: 0xffaa44`).
-* **Çift-Darbeli Şimşek (Double-Pulse Lightning):** $t = 0\text{ ms} \to 10.0$, $t = 80\text{ ms} \to 1.8$, $t = 160\text{ ms} \to 12.0$ tepe noktaları ve $650\text{ ms}$ üstel sönüm eğrisi. Gökyüzü sisi, ortam ışığı ve bina pencereleriyle senkronizedir.
-
-### 8. Sinematik Post-Processing (UnrealBloomPass, ACESFilmic, Vignette)
-* **Anti-Nuclear Bloom Kuralı:** Eşik değeri `threshold: 0.78`, `strength: 0.52`, `radius: 0.55` olarak ayarlanmıştır. Yalnızca ampuller, araba farları/stopları, neon tabelalar ve şimşek parlar; bina duvarları veya zemin parlamaz.
-* **ACESFilmic Tone Mapping:** Pozlama değeri `exposure: 1.12` ile derin gece kontrastı korunurken sıcak renkler zenginleştirilmiştir.
-* **Cinematic Vignette:** Ekranın kenarlarında sinematik odak kararması (`offset: 1.05, darkness: 1.25`).
+| Tuş / Etkileşim | Eylem | Teknik Karşılığı |
+|---|---|---|
+| **`A` / `←` (Sol Yön)** | **Caddeye Bak** | Başımızı sola, ana caddeye, araç farlarına ve karşı kaldırıma çevirir (hedef yaw: $+31.5^\circ \approx +0.55\text{ rad}$). |
+| **`D` / `→` (Sağ Yön)** | **Binalara Bak** | Başımızı sağa, butik vitrinlere, neon tabelalara ve ara sokaklara çevirir (hedef yaw: $-31.5^\circ \approx -0.55\text{ rad}$). |
+| **Tuş Bırakıldığında** | **Merkeze Dönüş** | Kamera üstel sönümleme ($1 - e^{-8.5\Delta t}$) ile pürüzsüzce ileri bakış eksenine ($0^\circ$) geri döner. |
+| **`Boşluk` (Spacebar)** | **Fırtına Şimşeği** | Çift darbeli şimşek arkını tetikler; fırtına bulutları, bina pencereleri, ortam aydınlatması ve 45 Hz sub-bass gök gürültüsü patlar. |
+| **Sol Fare Tık (Click)** | **Ses Başlatma** | Web Audio API ses motorunu başlatır (`AudioContext.resume()`). İstem dışı kör edici flaşları önlemek için şimşekten ayrılmıştır; yalnızca ses devreye girer. |
+| **`R` Tuşu** | **Şemsiye Silkeleme** | Viewmodel şemsiyeye 0.40 saniyelik sönümlü rotasyonel mikro titreşim (Umbrella Shake vibration: $26\text{ Hz}$, $\exp(-4.8t)$) uygular. |
 
 ---
 
-## 📊 Performans, Render Boru Hattı ve Düşük Donanım Testi
+## 🏛️ Temel Mimari ve Mühendislik Prensipleri
 
-### 1. Performans ve Kaynak Karşılaştırması
+### 1. First-Person POV Biyomekaniği ve Şemsiye Ataleti (`main.js` & `scene/walker.js`)
+
+Kameranın ray üzerinde giden mekanik bir robot gibi değil, yağmur altında ıslak kaldırımda yürüyen gerçek bir insan gibi hissettirmesi için biyomekanik bir hareket simülasyonu uygulanmıştır:
+
+* **Kamera Hiyerarşisi ve Güvenlik Koridoru:** Kamera insan göz hizasında ($Y = 1.78\text{ m}$) ve sağ kaldırım emniyet koridorunda ($X_{\text{base}} = -4.50\text{ m}$) konumlandırılmıştır.
+* **Asimetrik Biyomekanik Adım Dalgası (Gait Waveform):** Robotik $\sin(t)$ yerine topuk basışında sert iniş ve ağırlık transferinde yumuşak toparlanma sağlayan biyomekanik Fourier eğrisi:
+  $$\text{gaitV} = \sin(2\theta) + 0.28\sin(4\theta - 0.40) - 0.10\cos(2\theta)$$
+  $$\text{Landing Shock} = \max(0.0, -\text{gaitV} - 0.85) \times 0.008\text{ m}$$
+  $$\text{Foot Roll} = 0.018 \sin(\theta - 0.30)\text{ rad}$$
+* **İrrasyonel Mikro-Gürültüler (Continuous Micro-Noise):** Birbiriyle harmonik rezonansa girmeyen frekanslar ($0.71, 1.37, 2.83, 0.53, 1.19, 0.61, 1.43\text{ rad/s}$) ile dikey ($N_y$), yanal ($N_x$) ve adım eğimi ($N_{roll}$) eksenlerinde döngüsel periyot tamamen kırılmıştır.
+* **Kaldırım Yanal Süzülmesi (Lateral Drift):** Yürüyen karakter $0.12$ ve $0.23\text{ rad/s}$ frekanslarıyla kaldırım üzerinde doğal mikro salınım sergiler. Kesin güvenlik sınırları ile $X \in [-4.65, -4.35]\text{ m}$ koridoruna kilitlenerek dükkan tenteleriyle ($1.95\text{ m}$) ve yol bordürüyle ($1.63\text{ m}$) emniyet mesafesi korunur.
+* **Şemsiye Kütle Ataleti (Rotational Drag):** Kafa hızla dönerken ($\lambda = 8.5\text{ s}^{-1}$), kol ve el bileği kütlesi şemsiyeyi gecikmeli olarak sürükler:
+  $$\text{\_umbLagYaw} = \text{lerp}(\text{\_umbLagYaw}, \text{headYaw}, 1 - e^{-4.2\Delta t})$$
+  $$\text{dragYaw} = \text{\_umbLagYaw} - \text{headYaw}$$
+* **Şemsiye Silkeleme Dinamiği (Umbrella Shake Physics):** Kullanıcı `R` tuşuna bastığında şemsiyeye 0.40 saniyelik sönümlü yüksek frekanslı salınım uygulanır:
+  $$\theta_{\text{shake}} = 0.052 \cdot e^{-4.8 t} \cdot \sin(26 \cdot 2\pi t)$$
+* **Senkronize Yağmur Collider Matrisi:** Şemsiyenin atalet gecikmesi uygulandıktan hemen sonra `_fpsGroup.updateMatrixWorld(true)` çağrılarak kubbe dünya pozisyonu `_umbCenter`'a anında aktarılır; böylece `rain.js` analitik koni damla saptırma simülasyonu gecikmeli şemsiye kütlesiyle kusursuz senkronize çalışır.
+
+---
+
+### 2. 16-Bit HDR Post-Processing Boru Hattı (`scene/postprocessing.js`)
+
+Sahnenin karanlık gece atmosferinde renk basamaklanmasını (banding) engellemek ve yüksek dinamik aralığı korumak için özel bir post-processing mimarisi kurulmuştur:
+
+```
+[3D Sahne Renderı] 
+        │
+        ▼ (16-bit HalfFloatType Buffer)
+[UnrealBloomPass] ──► Ampuller, farlar, stoplar ve neonlar parlar (Threshold: 0.78, Strength: 0.52)
+        │
+        ▼
+[RainLensShader]  ──► Ekrana çarpan su damlaları arkadaki ışığı kırar (Refraction Distortion)
+        │
+        ▼
+[CleanVignette]   ──► Sinematik odak düşüşü; saf siyahlar korunur (Darkness: 0.75, Offset: 1.08)
+        │
+        ▼
+[OutputPass]      ──► ACESFilmic Tone Mapping (Exposure: 1.12) + sRGB Renk Uzayı
+```
+
+* **HalfFloatType Render Target:** 8-bit quantization kaynaklı gökyüzü sisi ve ıslak asfalt renk basamaklanmasını (color banding) tamamen yok etmek amacıyla `EffectComposer`, `THREE.HalfFloatType` (RGBA 16-bit float) render target ile çalıştırılır.
+* **Anti-Nuclear Bloom:** Sahneyi aşırı doygun beyazlığa boğmayan, yalnızca sokak lambası ampulleri (`emissive: 3.8`), araba farları/stopları (`3.4 - 3.8`) ve neon tabelaların (`3.2`) ışık saçtığı dengeli bloom eşiği (`threshold: 0.78, strength: 0.52, radius: 0.55`).
+* **RainLensShader (Lens Yağmur Kırılması):** Kamera camına çarpan seyrek yağmur damlacıklarının arkadaki şehir ışıklarını optik olarak kırdığı normal perturbation ve specular parıltı filtresi. `clamp(uv, 0.0, 1.0)` denetimi ile sınır taşmaları ve NaN pikselleri önlenir.
+* **CleanVignetteShader (Temiz Vinyet):** Siyahları kaldırmayan, kenarları sinematik bir odakla derinleştiren optimize edilmiş vinyet algoritması.
+
+---
+
+### 3. Saf Web Audio API Prosedürel Ses Motoru (`scene/audio.js`)
+
+Hiçbir harici `.mp3` veya `.wav` ses dosyasına ihtiyaç duymayan, tarayıcının yerel Web Audio API düğümleriyle gerçek zamanlı sentezlenen ses mimarisi:
+
+* **Sıfır Harici Ses Dosyası (0 KB Audio Download):** Ağ gecikmesi ve dosya yükleme bağımlılığı olmadan anında başlar.
+* **Sürekli Yağmur Ambiyansı:** Pink Noise üreteci + 750 Hz Lowpass BiquadFilter + rüzgar esintisi modülasyonu (600 - 900 Hz LFO).
+* **Islak Adım Sesi (Footsteps):** Asimetrik adım dalgasının yere temas çukurunda ($\text{gaitV} < -0.88$) sol ve sağ ayak için alternatif tetiklenen, su birikintisi şapırtısı ve taban darbesi içeren mikro ses sentezi.
+* **Uzak Araba Kornaları:** Rastgele aralıklarla devreye giren çift-tonlu osilatör çiftleri ($392\text{ Hz} + 440\text{ Hz}$).
+* **Derin Gök Gürültüsü (Thunder Rumble):** Şimşek anında senkron olarak devreye giren $45\text{ Hz}$ sub-bass darbesi ve $110\text{ Hz}$ yuvarlanan gürültü patlaması (3.5s üstel sönümleme).
+
+---
+
+### 4. Şehir Mimarisi ve Tekil Z-Wrap Senkronizasyonu (`scene/world/` & `scene/ground.js`)
+
+Sonsuz sokak döngüsünde nesnelerin birbirine çarpmasını ve doku atlamalarını önleyen geometri mimarisi:
+
+* **Tekil Senkron Z-Wrap:** Binalar, neon tabelalar, ara sokaklar, tenteler, klima üniteleri ve çatı antenleri `_cityGroup` altında birleştirilmiştir. Grup $240.0\text{ m}$ periyotla akar; her 240m'de 1 blok (8 bina, 4 neon tabela, 3 ara sokak) birebir aynı geometriyle yer değiştirdiği için sahnede $Z=0$'da **0 mm teleportasyon / 0 doku atlaması** sağlanır.
+* **No-Glow Roofs (Çatı UV Karartması):** Binaların çatı (Face 2: $+Y$) ve taban (Face 3: $-Y$) yüzeyleri pencere atlasının tamamen siyah ve emissive=0 olan referans paneline ($(0.015, 0.985)$) kilitlenmiştir; çatılarda gökyüzüne bakan parlak pencereler tamamen engellenmiştir.
+* **Z-Fighting Çözümü:** Taban asfaltı `baseMesh` $Y = -0.020\text{ m}$'ye çekilmiş ve `_reflector`'a `polygonOffset: true, factor: -1.0, units: -2.0` atanmıştır; 3000 metrelik ufuk boyunca sıfır piksel titremesi garanti edilir.
+* **Yaya Koridoru Güvenliği:** Yaya #6 bordür kenarına ($X = -3.35\text{ m}$), Yaya #3 ise ara sokak zeminine ($X = -8.20\text{ m}$) çekilerek kameranın near-plane kesilme riski tamamen ortadan kaldırılmıştır.
+* **Sıfır Bellek Tahsisi (Zero-Allocation Loop):** Animasyon ve render döngüsünde (`update` metodları) hiçbir `new THREE.Vector3()` veya geçici nesne oluşturulmaz; tüm hesaplamalar önceden ayrılmış modül-düzeyi tampon vektörler üzerinde çalıştırılır. Garbage Collection (GC) duraklamaları tamamen sıfırlanmıştır.
+
+---
+
+### 5. Modüler Şehir Alt Sistemleri (`scene/world/`)
+
+Bina cephelerinin düz kutu yüzeyinden gerçekçi şehir dokusuna taşınmasını sağlayan, Clean Architecture prensipleriyle ayrıştırılmış modüler alt sistemler:
+
+* **Ana Binalar (`buildings.js`):** 48 bina mimarisi, prosedürel duvar ve pencere atlasları, çatı UV karartması, bina yerleşimi ve Z-wrap senkronizasyonu.
+* **Mimari ve Sokak Detayları (`city-details.js`):** Gömme vitrin portalları, çatı korniş silmeleri, yağmur tahliye iniş boruları, çatı detayları ve sokak mobilyalarını yöneten sıfır-tahsisli `InstancedMesh` katmanları.
+* **Neon Tabelalar (`neon.js`):** 12 dinamik noir neon tabelası, prosedürel canvas dokuları ve bağımsız Z-wrap akış senkronizasyonu.
+* **Ara Sokaklar (`alleys.js`):** 3 atmosferik ara sokak, derinlik illüzyonlu zeminler ve asılı fener aydınlatmaları.
+* **Atmosferik Mikro-Detaylar (`atmosphere.js`):** Mazgal buhar bacaları (sinüzoidal dikey ivmeli `Points` parçacıkları) ve tente saçaklarından süzülen sıfır-tahsisli damlacık simülasyonu.
+* **Gizemli Noir Yayalar (`pedestrians.js`):** Silüet yayalar, yürüyüş kinematiği ve asenkron adım döngüleri.
+* **World Orkestrasyonu (`index.js`):** Alt sistemlerin başlatılmasını (`initWorld`) ve frame başına güncellenmesini (`updateWorld`) koordine eden kamuya açık API katmanı.
+
+---
+
+### 6. Kamera Fiziği, SkyDome ve Şimşek Olay Mimarisi (`scene/walker.js`, `scene/sky.js`, `scene/events.js`)
+
+* **Kamera Yürüyüş Kinematiği ve Şemsiye (`walker.js`):** Adım bobbing ve sway salınımı, klavye/fare etkileşimli kafa dönüşü (`headYaw` sönümlemesi), FPS şemsiye viewmodel'ı, kütle ataleti ve analitik yağmur saptırma collider'ı.
+* **Dinamik Fırtına Kubbesi (`sky.js`):** Gökyüzü kubbesi (SkyDome), atmosferik sis entegrasyonu ve şimşek anı tepe aydınlatması.
+* **Ayrıştırılmış Şimşek Olay Mimarisi (`events.js`):** Pub/Sub tabanlı şimşek olay mimarisi (`emitLightningFlash`, `subscribeLightning`). `lighting.js` tarafından tetiklenen şimşek darbeleri, gökyüzü (`sky.js`) ve binalara (`buildings.js`) döngüsel bağımlılık olmadan asenkron olarak iletilir.
+* **İki Katmanlı Yağmur Hacmi (`rain.js`):** 1600 toplam yağmur parçacığının 450'si kameranın tam önündeki dar hacme ($X \in [-6.6, -2.4]\text{ m}$, $Z \in [-1.2, 9.5]\text{ m}$) özel olarak tahsis edilmiştir. Bu ön hacim damlaları perspektif büyütmesiyle ekranı dolduran sinematik iğne çizgileri oluşturur.
+* **Şemsiye Kumaş Ses Sentezi (`audio.js`):** `R` tuşuna basıldığında Web Audio API, frekans süpürmeli yüksek frekanslı gürültü patlaması + ekspansiyel zarf (`BiquadFilter: 900 → 400 Hz`, sönüm: $\exp(-3.2t)$) ile gerçek kumaş titreşimi sesi üretir; herhangi bir `.wav` dosyası kullanılmaz.
+
+---
+
+## 📊 Performans ve Kaynak Karşılaştırması
 
 | Metrik | Eski 2D p5.js | Yeni 3D WebGL (Three.js r165) | Mühendislik Kazancı |
 |---|---|---|---|
 | **Render Motoru** | 2D CPU Canvas Context | Donanım Hızlandırmalı WebGL 2.0 | GPU Paralelleştirmesi |
-| **FPS Kararlılığı (Normal)** | 35 - 50 FPS (Dalgalı) | **60 FPS Kilitli (Locked / 136 FPS Tepe)** | Akıcı ve Stabil Kare Zamanı |
+| **FPS Kararlılığı (Normal)** | 35 - 50 FPS (Dalgalı) | **60 FPS Kilitli (Locked / 140+ FPS Tepe)** | Akıcı ve Kararlı Kare Zamanı |
 | **Düşük Donanım (4x CPU Throttling)** | 8 - 15 FPS (Kullanılamaz) | **Ort. 76.7 FPS / %99.5 > 30 FPS** | Zayıf CPU'larda Dahi Akıcı |
-| **Boru Hattı Draw Calls** | N/A (CPU çizim döngüsü) | **~264 Toplam (Çok Geçişli Pipeline)** | Fotogerçekçi PBR ve Yansıma |
+| **Boru Hattı Draw Calls** | N/A (CPU çizim döngüsü) | **~352 Toplam (Çok Geçişli Pipeline)** | Fotogerçekçi PBR ve Yansıma |
 | **Binalar, Lambalar & Yol** | 32 Ayrı CPU Döngüsü | **5 Draw Calls** (`InstancedMesh` Grubu) | %85+ CPU İletişim Tasarrufu |
-| **Yağmur Parçacıkları** | 420 Damla (CPU çizgi) | **1200 İğne Damla** (GPU Points + CPU Fiziği) | 3 Kat Yoğunluk, Sıfır Gecikme |
+| **Yağmur Parçacıkları** | 420 Damla (CPU çizgi) | **1600 İğne Damla** (450 Ön Hacim + 1150 Ortam) | 4× Yoğunluk, Sinematik Ön Plan |
 | **Ses Sistemi** | Ses Yok (Sessiz) | **Saf Prosedürel Web Audio API** | 0 KB Harici Dosya İndirme |
 | **Bellek & GC Baskısı**| Yüksek (Geçici Obje Üretimi) | **0 Byte/Frame (Sıfır Bellek Tahsisi)** | GC Duruşları Yok (No Stutters) |
-
----
-
-### 2. Draw Call Mimarisi: Erken Hedef (~22-28) vs. Üretim Mimarisi (~264)
-
-Projenin en erken fazındaki **"~22 - 28 Draw Call"** teorik tahmini; yalnızca statik birkaç bina bloğu, gölgesiz yön ışığı, tek parça zemin ve aynasız basit bir prototip için hesaplanmıştı. Sahnenin yaşayan sinematik bir metropole dönüştürülmesiyle birlikte **çok geçişli (multi-pass) modern render boru hattı** devreye girmiş ve kare başına toplam çağrı sayısı ~264 olarak optimize edilmiştir:
-
-| Render Geçişi (Pass) | Draw Call | Açıklama ve Ekipman |
-|---|:---:|---|
-| **1. DirectionalLight Shadow Map Pass** | **~50** | `_moonLight.castShadow`: 12 aracın şasileri/kabinleri/tekerlekleri, 6 yaya silüeti ve binaların derinlik haritası hesaplaması. |
-| **2. Planar Reflector FBO Pass** | **~102** | Islak asfaltın gerçek ayna yansıması için sanal kamera ile sahnenin yansıma dokusuna (FBO) çizimi (araba farları, neonlar, yayalar, binalar). |
-| **3. Main Scene Forward Pass** | **~100** | Birinci şahıs kameramızdan görünen ana sahne elemanları (12 araç, 12 3D neon blade tabela, 6 yaya, 3 ara sokak, binalar, lambalar, şemsiye, 1200 yağmur damlası). |
-| **4. Post-Processing (Bloom & Vignette)** | **~12** | `UnrealBloomPass` (5 kademeli downsample/upsample HDR blur kuadları) + `VignetteShader` + `OutputPass`. |
-| **TOPLAM BİRLEŞİK ÇAĞRI** | **~264** | **Tamamen sıfır GC bellek tahsisiyle 60 FPS kilitli yürütülür.** |
-
----
-
-### 3. Düşük Performanslı Donanım Simülasyonu (Chrome DevTools 4x CPU Throttling)
-
-Projenin düşük donanımlı dizüstü bilgisayarlarda veya mobil cihazlarda akıcılığını doğrulamak amacıyla Chrome DevTools Protocol (`Emulation.setCPUThrottlingRate: 4`) kullanılarak **4x CPU Slowdown** altında 380+ kare boyunca kesintisiz donanım simülasyonu çalıştırılmıştır:
-
-```json
-{
-  "testKapsami": "Chrome DevTools Protocol (CDP) — 4x CPU Slowdown Simulation",
-  "ornekKareSayisi": 382,
-  "testSuresi": "5.00 saniye",
-  "olculenMetrikler": {
-    "ortalamaFPS": 76.7,
-    "medyanFPS": 72.5,
-    "tepeFPS": 147.1,
-    "p1_Low_FPS (En Kötü %1)": 36.0,
-    "ortalamaKareZamani": "13.05 ms (30 FPS sınırı olan 33.3 ms'nin oldukça altında)",
-    "kareKaybiOrani (FPS < 30)": "%0.5 (Yalnızca ilk frekans adaptasyon anında 2 kare)"
-  },
-  "sonuc": "BAŞARILI — 4 kat zayıflatılmış CPU simülasyonunda dahi 30 FPS tabanının altına DÜŞMEMEKTEDİR."
-}
-```
 
 ---
 
@@ -169,21 +160,31 @@ Projenin düşük donanımlı dizüstü bilgisayarlarda veya mobil cihazlarda ak
 Animasyon_Ödevi/
 │
 ├── index.html              # Giriş noktası (Three.js r165 ES Module + importmap + HUD)
-├── main.js                 # Sahne yöneticisi (First-Person kamera, render loop, etkileşimli kafa dönüşü)
+├── main.js                 # Sahne orkestratörü (Render döngüsü, girdi işleme, modül koordinasyonu)
 │
 ├── scene/
-│   ├── audio.js            # Saf Web Audio API prosedürel ses motoru (yağmur, korna, gök gürültüsü)
-│   ├── walker.js           # FPS Viewmodel şemsiye mimarisi, kol ataleti ve yağmur saptırma fiziği
-│   ├── rain.js             # 1200 iğne yağmur sistemi, analitik koni şemsiye saptırma fiziği
+│   ├── sky.js              # Dinamik fırtına gökyüzü kubbesi (SkyDome) ve şimşek aydınlanması
+│   ├── lighting.js         # 16 sokak lambası, dinamik 4-PointLight havuzu, çift-darbeli şimşek motoru
 │   ├── ground.js           # Yüksek kontrastlı asfalt, granit bordürler, sarı kesikler, Planar Reflector
-│   ├── world.js            # 48 bina, ara sokak geçişleri, 4 gizemli yaya silüeti, 12 parlayan 3D neon
+│   ├── rain.js             # 1600 iğne yağmur sistemi, analitik koni şemsiye saptırma ve zemin sıçramaları
 │   ├── traffic.js          # Yoğun şehir trafiği (12 araç), 3 kasa tipi, göreli hız fiziği, far/stoplar
-│   ├── lighting.js         # 16 sokak lambası, dinamik 4-PointLight havuzu, çift-darbeli şimşek
-│   └── postprocessing.js   # EffectComposer, UnrealBloomPass, VignetteShader, OutputPass
+│   ├── walker.js           # Kamera yürüyüş kinematiği (bobbing/sway), etkileşimli kafa dönüşü, FPS şemsiye viewmodel
+│   ├── audio.js            # Saf Web Audio API prosedürel ses motoru (yağmur, korna, adım, gök gürültüsü)
+│   ├── postprocessing.js   # 16-bit HDR EffectComposer, UnrealBloom, RainLensShader, CleanVignette
+│   ├── shadows.js          # 24 instance birleşik temas gölgeleri (araçlar, yayalar, walker)
+│   ├── events.js           # Bağımsız Pub/Sub şimşek olay mimarisi (Decoupled Lightning Domain Events)
+│   └── world/              # Modüler şehir alt sistemleri:
+│       ├── index.js        # World orchestration ve public API katmanı
+│       ├── buildings.js    # 48 bina, prosedürel PBR doku atlası, geometri dilimleri ve Z-wrap
+│       ├── city-details.js # Gömme vitrin portalları, korniş silmeleri, iniş boruları, çatı mobilyaları
+│       ├── neon.js         # 12 dinamik noir neon tabelası, prosedürel canvas dokuları
+│       ├── alleys.js       # 3 atmosferik ara sokak, zemin ve asılı fenerler
+│       ├── atmosphere.js   # Mazgal buhar bacaları ve tente saçağı damlacık fiziği
+│       └── pedestrians.js  # Gizemli noir yayalar ve yürüyüş kinematiği
 │
-├── legacy/                 # Orijinal p5.js referans kodları
-│   ├── Animasyon_ödevi.html
-│   └── Animasyon_ödevi.js
+├── docs/
+│   └── screenshots/        # Doğrulanmış güncel motor içi ekran görüntüleri (01, 02, 03, diag)
+├── scratch/                # CDP doğrulama, döngüsel bağımlılık ve sıfır-tahsis test araçları
 │
 └── README.md               # Portföy ve mühendislik dokümantasyonu
 ```
@@ -192,26 +193,44 @@ Animasyon_Ödevi/
 
 ## 🚀 Kurulum ve Yerel Çalıştırma
 
-Proje saf ES Modülleri kullandığından dolayı yerel bir HTTP sunucusu üzerinden çalıştırılmalıdır:
+Proje saf ES Modülleri (`import` / `export`) ve WebGL 2.0 kullandığı için `file:///` protokolü yerine yerel bir HTTP sunucusu üzerinden çalıştırılmalıdır:
 
 ```bash
-# Seçenek 1: Node.js (npx) ile
-npx serve .
+# Node.js (npx) ile doğrudan çalıştırma (Önerilen):
+npx http-server -p 8080
 
-# Seçenek 2: Python 3 ile
+# Alternatif: Python 3 ile
 python -m http.server 8080
-
-# Seçenek 3: VS Code Live Server Eklentisi ile
-# index.html üzerinde "Open with Live Server" seçin.
 ```
 
-Tarayıcınızda açın:
+Ardından tarayıcınızda açın:
 ```
 http://localhost:8080
 ```
-> **İpucu:** Sayfada `ArrowLeft` / `A` ve `ArrowRight` / `D` tuşlarıyla başınızı sağa ve sola çevirebilir, Boşluk tuşu veya tıklamayla gök gürültülü şimşeği tetikleyebilirsiniz.
+
+> **Not:** Tarayıcıların "Autoplay Policy" kısıtlamaları gereği Web Audio API ses motoru sayfaya ilk sol tıklandığında devreye girer.
+
+---
+
+## 🔮 Gelecek Geliştirmeler / Future Work (Faz 5: Curved Boulevard & Intersection Architecture)
+
+Projenin bir sonraki teorik vizyonu ve mühendislik yol haritası olarak planlanan **Faz 5**, doğrusal sonsuz cadde geometrisini dinamik bir açık dünya topolojisine taşımayı hedefler:
+
+1. **Eğrilikli Bulvar Geometrisi (Curved Spline Boulevards):**
+   - Catmull-Rom veya Bezier spline eğrileri boyunca kıvrılan yol geometrisi.
+   - Yolun teğet açısına (tangent alignment) ve bank eğimine (camber) göre otomatik yönelen dinamik bina ve sokak lambası yerleşim matrisleri.
+2. **4 Yönlü Akıllı Kavşaklar ve Trafik Sinyalizasyonu (Smart Intersection Architecture):**
+   - Zemin katında dönel kavşaklar veya 4 yollu kesişim noktaları.
+   - Gerçek zamanlı yeşil/sarı/kırmızı sinyalizasyon döngüsü ve kırmızı ışık algılandığında yumuşak frenleme yapan, yeşil yandığında ivmelenen otonom araç kuyruk fiziği (traffic queuing simulation).
+3. **Yaya Geçiş ve Navmesh Yapay Zekası (Pedestrian Crosswalk AI):**
+   - Yayaların yalnızca kaldırım üzerinde doğrusal yürümesi yerine yaya geçitlerini (`zebra crossing`) kullanarak karşıdan karşıya geçtiği durum makineleri (Hierarchical State Machines).
+   - Yayaların yaklaşan araçları algılayıp durduğu ve araçların yayalara yol verdiği çarpışma önleme protokolleri.
+4. **Dinamik Hava Olayları ve Asfalt Kuruma Shader'ı (Dynamic Weather & Puddle Evaporation):**
+   - Hafif çiseleyen yağmurdan sağanak fırtınaya dinamik geçişler.
+   - Yağmur dindikten sonra asfalt üzerinde oluşan su birikintilerinin buharlaşmasını simüle eden zaman-bağımlı specular/roughness buharlaşma shader katmanı.
 
 ---
 
 ## 📜 Lisans
-Bu çalışma MIT lisansı kapsamında geliştirilmiştir.
+
+Bu proje [MIT Lisansı](LICENSE) altında açık kaynak olarak sunulmaktadır.

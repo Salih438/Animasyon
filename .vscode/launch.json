@@ -1,18 +1,24 @@
 {
-    // Olası öznitelikler hakkında bilgi edinmek için IntelliSense kullanın.
-    // Mevcut özniteliklerin açıklamalarını görüntülemek için üzerine gelin.
-    // Daha fazla bilgi için şu adresi ziyaret edin: https://go.microsoft.com/fwlink/?linkid=830387
-    "version": "0.2.0",
-    "configurations": [
-        
-        
-
-        {
-            "type": "chrome",
-            "request": "launch",
-            "name": "Chrome'u localhost'ta başlat",
-            "url": "http://localhost:8080",
-            "webRoot": "${workspaceFolder}"
-        }
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "chrome",
+      "request": "attach",
+      "name": "Chrome'a Bağlan (localhost:8080)",
+      "port": 9222,
+      "url": "http://localhost:8080*",
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "Start Server",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "type": "chrome",
+      "request": "launch",
+      "name": "Chrome'u Yeni Başlat (İlk Kurulum)",
+      "url": "http://localhost:8080",
+      "webRoot": "${workspaceFolder}",
+      "runtimeArgs": ["--remote-debugging-port=9222"],
+      "preLaunchTask": "Start Server"
+    }
+  ]
 }
