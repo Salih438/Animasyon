@@ -61,8 +61,8 @@ export function initSky(scene) {
   _skyGeo = new THREE.SphereGeometry(300, 32, 16);
   _skyMat = new THREE.ShaderMaterial({
     uniforms: {
-      colorTop:        { value: new THREE.Color(0x020205) },
-      colorBottom:     { value: new THREE.Color(0x0c0b0a) },
+      colorTop:        { value: new THREE.Color(0x0d1526) },
+      colorBottom:     { value: new THREE.Color(0x1c2a44) },
       lightningFactor: { value: 0.0 }
     },
     vertexShader:   SKY_VERTEX_SHADER,

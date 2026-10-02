@@ -1,6 +1,9 @@
 # Scratch & test scripts / temporary artifacts
 scratch/
 
+# Dependencies
+node_modules/
+
 # OS & Environment files
 .DS_Store
 Thumbs.db

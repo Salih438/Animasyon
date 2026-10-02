@@ -268,7 +268,7 @@ const WetAsphaltReflectorShader = {
     tDiffuse:      { value: null },
     textureMatrix: { value: new THREE.Matrix4() },
     tPuddle:       { value: null },
-    uBlendFactor:  { value: 0.35 },                      // Canlı su birikintisi yansıması
+    uBlendFactor:  { value: 0.46 },                      // Canlı ve parlak ıslak zemin yansıması
     uTime:         { value: 0.0 },                       // Yağmur mikro-ripple zamanı
     fogColor:      { value: new THREE.Color(0x050510) },
     fogDensity:    { value: 0.00045 },
@@ -445,25 +445,25 @@ function _initMaterials(maxAniso = 16) {
   // roughnessMap: çukurlarda/tekerlek izlerinde düşük roughness (ayna yansıma),
   //              genel yüzeyde yüksek roughness (dağınık/ıslak beton yansıma).
   _matAsphalt = new THREE.MeshStandardMaterial({
-    color:        0x090b10,
-    roughness:    0.65,      // ← 0.18'den yükseltildi: genel beton mat, sadece birikintiler parlar
-    metalness:    0.28,
-    roughnessMap: roughnessTex, // Puddle Mask: su birikintisi/tekerlek izleri parlak, genel yüzey mat
+    color:        0x0a0d14,
+    roughness:    0.58,      // Genel ıslak zemin dengesi
+    metalness:    0.32,
+    roughnessMap: roughnessTex, // Puddle Mask: su birikintisi/tekerlek izleri ayna gibi parlak
   });
 
-  // Kaldırımlar: Dokulu ıslak granit taş döşeme (Pavers) — 0xffffff ile map dokusu tam zenginliğiyle yansır
+  // Kaldırımlar: Dokulu ıslak granit taş döşeme (Pavers)
   _matSidewalk = new THREE.MeshStandardMaterial({
     color:     0xffffff,
     map:       _sidewalkTex,
-    roughness: 0.32,
-    metalness: 0.14,
+    roughness: 0.27,         // Islak granit taş kaplama parlaklığı (0.25 - 0.30 aralığı)
+    metalness: 0.22,
   });
 
   // Bordürler: Yükseltilmiş ıslak granit taş — asfalttan ve kaldırımdan net ayrılan kontrast
   _matCurb = new THREE.MeshStandardMaterial({
-    color:     0x68748c,
-    roughness: 0.25,
-    metalness: 0.20,
+    color:     0x7886a0,
+    roughness: 0.22,
+    metalness: 0.25,
   });
 
   // Parlak sarı kesik orta şerit — suyun altından jilet gibi parıldasın

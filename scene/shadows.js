@@ -16,6 +16,7 @@
 import * as THREE from 'three';
 import { getTrafficData } from './traffic.js';
 import { getPedestrianData } from './world/index.js';
+import { ROAD_MIN_X, ROAD_MAX_X } from './ground.js';
 
 const TOTAL_SHADOW_INSTANCES = 24;
 
@@ -145,7 +146,7 @@ export function updateShadows(cameraPos) {
     if (p < pedCount) {
       const ped = pedestrians[p];
       // Kaldırım üstü temas kotu (Y = 0.142 m) veya asfalt temas kotu (Y = 0.015 m)
-      const isSidewalk = (ped.x < -2.55 || ped.x > 6.20);
+      const isSidewalk = (ped.x < ROAD_MIN_X || ped.x > ROAD_MAX_X);
       const contactY = isSidewalk ? 0.142 : 0.015;
       _pos.set(ped.x, contactY, ped.z);
       // Dairesel yumuşak temas gölgesi (0.95m x 0.95m)

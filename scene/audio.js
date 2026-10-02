@@ -70,8 +70,24 @@ export function startAudio() {
 
   if (!_isStarted) {
     _startRainNoise();
-    _scheduleNextHorn();
     _isStarted = true;
+  }
+
+  if (_hornTimer === null) {
+    _scheduleNextHorn();
+  }
+}
+
+/**
+ * Ses motorunu durdurur ve zamanlayıcıları temizler.
+ */
+export function stopAudio() {
+  if (_hornTimer !== null) {
+    clearTimeout(_hornTimer);
+    _hornTimer = null;
+  }
+  if (_audioCtx && _audioCtx.state === 'running') {
+    _audioCtx.suspend();
   }
 }
 

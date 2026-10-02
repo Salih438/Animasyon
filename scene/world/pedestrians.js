@@ -35,14 +35,14 @@ function _createNoirPedestrian(cfg) {
   const hasUmb    = cfg.hasUmbrella !== false;
   const hasHood   = cfg.hasHood === true;
 
-  const matCoat  = new THREE.MeshStandardMaterial({ color: coatColor, roughness: 0.35, metalness: 0.15 });
-  const matPants = new THREE.MeshStandardMaterial({ color: 0x141820, roughness: 0.60, metalness: 0.08 });
-  const matShoes = new THREE.MeshStandardMaterial({ color: 0x08090c, roughness: 0.22, metalness: 0.35 });
-  const matSkin  = new THREE.MeshStandardMaterial({ color: 0xcca888, roughness: 0.70, metalness: 0.05 });
-  const matHat   = new THREE.MeshStandardMaterial({ color: 0x0f1116, roughness: 0.45, metalness: 0.15 });
+  const matCoat  = new THREE.MeshStandardMaterial({ color: coatColor, roughness: 0.28, metalness: 0.22 });
+  const matPants = new THREE.MeshStandardMaterial({ color: 0x18202c, roughness: 0.50, metalness: 0.12 });
+  const matShoes = new THREE.MeshStandardMaterial({ color: 0x0c0e14, roughness: 0.20, metalness: 0.40 });
+  const matSkin  = new THREE.MeshStandardMaterial({ color: 0xd8b494, roughness: 0.65, metalness: 0.05 });
+  const matHat   = new THREE.MeshStandardMaterial({ color: 0x161a22, roughness: 0.40, metalness: 0.18 });
   const matBrass = new THREE.MeshStandardMaterial({ color: 0xd4af37, roughness: 0.25, metalness: 0.85 });
-  const matUmb   = new THREE.MeshStandardMaterial({ color: umbColor,  roughness: 0.30, metalness: 0.20, side: THREE.DoubleSide });
-  const matShaft = new THREE.MeshStandardMaterial({ color: 0x20242c, roughness: 0.25, metalness: 0.80 });
+  const matUmb   = new THREE.MeshStandardMaterial({ color: umbColor,  roughness: 0.24, metalness: 0.30, side: THREE.DoubleSide });
+  const matShaft = new THREE.MeshStandardMaterial({ color: 0x28303c, roughness: 0.22, metalness: 0.85 });
 
   const chestGeo = new THREE.BoxGeometry(0.38 * scaleX, 0.42 * scaleY, 0.22 * scaleX);
   chestGeo.translate(0, 1.04 * scaleY, 0);
@@ -176,12 +176,12 @@ export function buildPedestrians(parentGroup) {
   _pedestriansGroup.name = 'city_pedestrians';
 
   const configs = [
-    { id: 1, x: LEFT_SW_X - 1.5,  z:  42.0, yaw: 0.0,       speed: -1.3, isWalking: true,  phase: 0.0,  scaleX: 1.02, scaleY: 1.08, coatColor: 0x0e172a, umbColor: 0x8a6218, hasUmbrella: true,  hasHood: false, headOffset: 0.0 },
-    { id: 2, x: LEFT_SW_X - 1.0,  z:  86.0, yaw: Math.PI,   speed:  1.1, isWalking: true,  phase: 1.85, scaleX: 0.92, scaleY: 0.90, coatColor: 0x1a1c22, umbColor: 0x143428, hasUmbrella: true,  hasHood: false, headOffset: 1.2 },
-    { id: 3, x: RIGHT_SW_X + 2.5, z:  28.0, yaw: 1.5,        speed:  0.0, isWalking: false, phase: 0.72, scaleX: 1.04, scaleY: 1.00, coatColor: 0x2d1218, umbColor: 0x000000, hasUmbrella: false, hasHood: true,  headOffset: 0.6 },
-    { id: 4, x: RIGHT_SW_X + 2.0, z: 104.0, yaw: 1.4,        speed:  0.0, isWalking: false, phase: 2.40, scaleX: 0.98, scaleY: 0.98, coatColor: 0x16181f, umbColor: 0x4d181e, hasUmbrella: true,  hasHood: false, headOffset: 2.1 },
-    { id: 5, x: LEFT_SW_X - 1.8,  z: 140.0, yaw: 0.0,        speed: -1.5, isWalking: true,  phase: 3.95, scaleX: 0.95, scaleY: 1.12, coatColor: 0x11141c, umbColor: 0x181a22, hasUmbrella: true,  hasHood: false, headOffset: 3.4 },
-    { id: 6, x: RIGHT_SW_X + 1.85,z:  58.0, yaw: Math.PI,   speed:  0.8, isWalking: true,  phase: 5.10, scaleX: 1.00, scaleY: 0.96, coatColor: 0x1b2417, umbColor: 0x5c523e, hasUmbrella: true,  hasHood: false, headOffset: 4.5 },
+    { id: 1, x: LEFT_SW_X - 1.5,  z:  42.0, yaw: 0.0,       speed: -1.3, isWalking: true,  phase: 0.0,  scaleX: 1.02, scaleY: 1.08, coatColor: 0x18243c, umbColor: 0x9a7220, hasUmbrella: true,  hasHood: false, headOffset: 0.0 },
+    { id: 2, x: LEFT_SW_X - 1.0,  z:  86.0, yaw: Math.PI,   speed:  1.1, isWalking: true,  phase: 1.85, scaleX: 0.92, scaleY: 0.90, coatColor: 0x242834, umbColor: 0x1e4436, hasUmbrella: true,  hasHood: false, headOffset: 1.2 },
+    { id: 3, x: RIGHT_SW_X + 2.5, z:  28.0, yaw: 1.5,        speed:  0.0, isWalking: false, phase: 0.72, scaleX: 1.04, scaleY: 1.00, coatColor: 0x3d1a24, umbColor: 0x000000, hasUmbrella: false, hasHood: true,  headOffset: 0.6 },
+    { id: 4, x: RIGHT_SW_X + 2.0, z: 104.0, yaw: 1.4,        speed:  0.0, isWalking: false, phase: 2.40, scaleX: 0.98, scaleY: 0.98, coatColor: 0x202430, umbColor: 0x5a2028, hasUmbrella: true,  hasHood: false, headOffset: 2.1 },
+    { id: 5, x: LEFT_SW_X - 1.8,  z: 140.0, yaw: 0.0,        speed: -1.5, isWalking: true,  phase: 3.95, scaleX: 0.95, scaleY: 1.12, coatColor: 0x1c2230, umbColor: 0x2c3444, hasUmbrella: true,  hasHood: false, headOffset: 3.4 },
+    { id: 6, x: RIGHT_SW_X + 1.85,z:  58.0, yaw: Math.PI,   speed:  0.8, isWalking: true,  phase: 5.10, scaleX: 1.00, scaleY: 0.96, coatColor: 0x243220, umbColor: 0x6e644e, hasUmbrella: true,  hasHood: false, headOffset: 4.5 },
   ];
 
   for (const cfg of configs) {

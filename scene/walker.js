@@ -78,6 +78,11 @@ let _lastDragYaw = 0.0; // Son sürüklenme (drag) açısı farkı
 let _shakeTimer        = 0.0;
 const SHAKE_DURATION   = 0.40; // 0.40 saniye sönümlü titreşim süresi
 
+// ── Şemsiye Açma/Kapatma (Toggle) Durumu (R Tuşu) ───────────────────────────
+let _umbrellaOpenState   = 1.0; // 1.0 = tam açık, 0.0 = tam kapalı / aşağıda
+let _umbrellaTargetState = 1.0; // Hedef durum (1.0 açık, 0.0 kapalı)
+let _innerFillLight      = null; // Kubbe altı dolgu ışığı referansı
+
 // ── Faz 8: Biyomekanik Kamera Yürüyüş Fiziği State'i ─────────────────────────
 let _cameraRef       = null;
 let _simTime         = 0.0;
@@ -91,8 +96,12 @@ const _camConfig = {
   baseX:  -4.044,
   baseY:   1.78,
   baseZ:   0.00,
-  lookAt:  { x: -1.2, y: 1.55, z: 120.0 }
+  lookAt:  { x: -1.2, y: 1.55, lookDist: 120.0 } // lookDist: bakış mesafesi (z koordinatı değil)
 };
+
+// Güvenlik koridoru: kaldırım üzerinde güvenli yürüme bandı sınırları
+const SIDEWALK_CORRIDOR_MIN_X = -4.25;
+const SIDEWALK_CORRIDOR_MAX_X = -3.85;
 
 // Zero-allocation dünya pozisyonu vektörü
 const _umbCenter = new THREE.Vector3();
@@ -103,30 +112,34 @@ const _umbCenter = new THREE.Vector3();
 
 function _createMaterials() {
   return {
-    // Kumaş: Koyu antrasit-lacivert su geçirmez şemsiye kumaşı (çift taraflı)
+    // Kumaş: Koyu antrasit-lacivert su geçirmez şemsiye kumaşı (ıslak parıltı)
     canopy: new THREE.MeshStandardMaterial({
-      color:     0x121622,
-      roughness: 0.35,
-      metalness: 0.15,
-      side:      THREE.DoubleSide,
+      color:             0x1e2638,
+      roughness:         0.28,
+      metalness:         0.25,
+      side:              THREE.DoubleSide,
+      emissive:          new THREE.Color(0x101828),
+      emissiveIntensity: 0.35,
     }),
-    // Metalik teller ve tepe ucu: Koyu çelik
+    // Metalik teller ve tepe ucu: Parlatılmış çelik (sokak ışıklarını yansıtır)
     ribs: new THREE.MeshStandardMaterial({
-      color:     0x3a3d48,
-      roughness: 0.30,
-      metalness: 0.80,
+      color:             0x687084,
+      roughness:         0.18,
+      metalness:         0.92,
+      emissive:          new THREE.Color(0x2a354b),
+      emissiveIntensity: 0.45,
     }),
-    // Baston sapı gövdesi: Mat siyah alüminyum/karbon çubuk
+    // Baston sapı gövdesi: Koyu saten metalik çubuk
     shaft: new THREE.MeshStandardMaterial({
-      color:     0x18181c,
-      roughness: 0.30,
-      metalness: 0.60,
+      color:     0x242834,
+      roughness: 0.25,
+      metalness: 0.70,
     }),
     // Baston kulpu (J-Handle): Cilalı koyu maun ahşap / deri tutuş
     handle: new THREE.MeshStandardMaterial({
-      color:     0x241812,
-      roughness: 0.45,
-      metalness: 0.10,
+      color:     0x3c2418,
+      roughness: 0.38,
+      metalness: 0.12,
     }),
     // Metalik halka / manşet: Parlak pirinç vurgu
     brass: new THREE.MeshStandardMaterial({
@@ -176,6 +189,12 @@ function _buildFpsUmbrella(mat) {
   _canopyMesh.rotation.x = -0.06;
   _canopyMesh.rotation.z =  0.04;
   root.add(_canopyMesh);
+
+  // Kubbe altı dolgu ışığı: Şemsiyenin iç kubbesini ve 8 teli alttan yumuşakça aydınlatır
+  _innerFillLight = new THREE.PointLight(0x405575, 1.35, 2.5);
+  _innerFillLight.name = 'umbrellaInnerFill';
+  _innerFillLight.position.set(0.0, -0.08, 0.0);
+  _canopyMesh.add(_innerFillLight);
 
   // ── 2. Kubbe Tepe Ferrule Ucu (Top Apex Tip) ─────────────────────────────
   const tipGeo = new THREE.CylinderGeometry(0.012, 0.016, 0.06, 12);
@@ -380,9 +399,9 @@ function _updateCameraPhysics(camera, dt, turnInput) {
   // Dikey pozisyon (biyomekanik yaylanma + şok sönümleme + mikro gürültü):
   camera.position.y = _camConfig.baseY + gaitV * 0.038 - landingShock + ny;
 
-  // Güvenlik koridoru: kaldırım üzerinde [-4.25, -3.85] m aralığında tutulur
+  // Güvenlik koridoru: kaldırım üzerinde [SIDEWALK_CORRIDOR_MIN_X, SIDEWALK_CORRIDOR_MAX_X] aralığında tutulur
   const rawX = wanderBaseX + Math.sin(_walkTime) * 0.020 + nx;
-  camera.position.x = Math.min(-3.85, Math.max(-4.25, rawX));
+  camera.position.x = Math.min(SIDEWALK_CORRIDOR_MAX_X, Math.max(SIDEWALK_CORRIDOR_MIN_X, rawX));
   camera.position.z = _camConfig.baseZ;
 
   // 2c. Islak Adım Sesi (Procedural Footstep Audio Sync)
@@ -397,7 +416,7 @@ function _updateCameraPhysics(camera, dt, turnInput) {
   // 3. Bakış Yönü + Kafa Dönüşü (CONFIG.camera.lookAt referanslı)
   const baseTargetX = _camConfig.lookAt.x;
   const baseTargetY = _camConfig.lookAt.y;
-  const lookDist    = _camConfig.lookAt.z;
+  const lookDist    = _camConfig.lookAt.lookDist;
 
   const lookX = baseTargetX + Math.sin(_headYaw) * lookDist;
   const lookY = baseTargetY;
@@ -444,6 +463,28 @@ export function updateWalker(delta, camera, turnInput = null) {
   const sLag     = Math.sin(lagTime);
   const sLag2    = Math.sin(lagTime * 2);
 
+  // 2a. Şemsiye Açma / Kapatma İnterpolasyonu (Toggle Smoothstep)
+  if (_umbrellaOpenState !== _umbrellaTargetState) {
+    const rate = 3.0; // ~0.33 saniye yumuşak geçiş
+    if (_umbrellaOpenState < _umbrellaTargetState) {
+      _umbrellaOpenState = Math.min(_umbrellaTargetState, _umbrellaOpenState + rate * dt);
+    } else {
+      _umbrellaOpenState = Math.max(_umbrellaTargetState, _umbrellaOpenState - rate * dt);
+    }
+  }
+
+  const openFactor = THREE.MathUtils.smoothstep(_umbrellaOpenState, 0.0, 1.0);
+
+  // Kubbe daralma (kapanma) ve iç dolgu ışığı senkronizasyonu
+  if (_canopyMesh) {
+    const radScale = 0.14 + 0.86 * openFactor;
+    const hScale   = 0.94 + 0.06 * openFactor;
+    _canopyMesh.scale.set(radScale, hScale, radScale);
+    if (_innerFillLight) {
+      _innerFillLight.intensity = 1.35 * openFactor;
+    }
+  }
+
   // 2b. Şemsiye Silkeleme Titreşim Fiziği ('R' tuşu ile tetiklenir, 0.4 saniye sönümlü)
   let shakeOffsetRotZ = 0.0;
   let shakeOffsetRotY = 0.0;
@@ -462,14 +503,22 @@ export function updateWalker(delta, camera, turnInput = null) {
     shakeOffsetPosY = Math.abs(wave) * 0.012;
   }
 
-  // 2. Damped Viewmodel Sway (Adım yaylanması + Kafa dönüşünde kol ataleti + Silkeleme)
-  _fpsGroup.position.x = BASE_POS.x + sLag * SWAY_POS_X + dragYaw * 0.075 + shakeOffsetPosX;
-  _fpsGroup.position.y = BASE_POS.y + sLag2 * SWAY_POS_Y + shakeOffsetPosY;
-  _fpsGroup.position.z = BASE_POS.z;
+  // 2c. Damped Viewmodel Sway + İndirme/Kaldırma Pozisyonu (Açma/Kapama ile lerp)
+  const curBaseX = THREE.MathUtils.lerp(0.58, BASE_POS.x, openFactor);
+  const curBaseY = THREE.MathUtils.lerp(-0.86, BASE_POS.y, openFactor);
+  const curBaseZ = THREE.MathUtils.lerp(-0.42, BASE_POS.z, openFactor);
 
-  _fpsGroup.rotation.z = BASE_ROT.z + sLag * SWAY_ROT_Z - dragYaw * 0.32 + shakeOffsetRotZ;
-  _fpsGroup.rotation.x = BASE_ROT.x + sLag2 * SWAY_ROT_X;
-  _fpsGroup.rotation.y = BASE_ROT.y - _headYaw * 0.22 + dragYaw * 0.45 + shakeOffsetRotY;
+  const curRotX  = THREE.MathUtils.lerp(0.35, BASE_ROT.x, openFactor);
+  const curRotY  = THREE.MathUtils.lerp(-0.12, BASE_ROT.y, openFactor);
+  const curRotZ  = THREE.MathUtils.lerp(-0.55, BASE_ROT.z, openFactor);
+
+  _fpsGroup.position.x = curBaseX + (sLag * SWAY_POS_X + dragYaw * 0.075 + shakeOffsetPosX) * openFactor;
+  _fpsGroup.position.y = curBaseY + (sLag2 * SWAY_POS_Y + shakeOffsetPosY) * openFactor;
+  _fpsGroup.position.z = curBaseZ;
+
+  _fpsGroup.rotation.z = curRotZ + (sLag * SWAY_ROT_Z - dragYaw * 0.32 + shakeOffsetRotZ) * openFactor;
+  _fpsGroup.rotation.x = curRotX + (sLag2 * SWAY_ROT_X) * openFactor;
+  _fpsGroup.rotation.y = curRotY + (-_headYaw * 0.22 + dragYaw * 0.45 + shakeOffsetRotY) * openFactor;
 
   // 3. Matris Senkronizasyonu:
   _fpsGroup.updateMatrixWorld(true);
@@ -483,17 +532,17 @@ export function updateWalker(delta, camera, turnInput = null) {
 
 /**
  * Şemsiye çarpışma verisini döndürür (rain.js entegrasyonu).
- * Şemsiye görünür değilse collider devre dışı (enabled: false) döner.
+ * Şemsiye kapalıyken veya görünür değilse collider devre dışı (enabled: false) döner.
  *
  * @returns {{ center: THREE.Vector3, radius: number, enabled: boolean }}
  */
 export function getUmbrellaCollider() {
   const isVisible = _fpsGroup ? _fpsGroup.visible : false;
-  const currentScaleX = _fpsGroup ? _fpsGroup.scale.x : 1.0;
+  const currentScaleX = _canopyMesh ? _canopyMesh.scale.x : 1.0;
   return {
     center:  _umbCenter,
     radius:  CANOPY_RADIUS * currentScaleX,
-    enabled: isVisible,
+    enabled: isVisible && _umbrellaOpenState > 0.40,
   };
 }
 
@@ -507,17 +556,38 @@ export function getUmbrellaInertiaData() {
     headYaw: _lastHeadYaw,
     visible: _fpsGroup ? _fpsGroup.visible : false,
     center:  _umbCenter,
+    openState: _umbrellaOpenState,
   };
 }
 
 /**
- * Şemsiye silkeleme titreşimini (Umbrella Shake) tetikler ('R' tuşu).
+ * Şemsiye Açma / Kapatma (Toggle) fonksiyonu ('R' tuşu).
+ * Açıkken basılırsa önce silkelenir, ardından kubbesi daralarak sağ alta iner ve görüş açılır.
+ * Kapalıyken basılırsa yukarı kalkıp açılır ve yağmur çarpışma fiziği tekrar devreye girer.
  */
-export function triggerUmbrellaShake() {
-  _shakeTimer = SHAKE_DURATION;
-  if (_fpsGroup) {
-    _fpsGroup.visible = true;
+export function toggleUmbrella() {
+  if (_umbrellaTargetState > 0.5) {
+    // Kapatma
+    _shakeTimer = SHAKE_DURATION;
+    _umbrellaTargetState = 0.0;
+  } else {
+    // Açma
+    _umbrellaTargetState = 1.0;
+    _shakeTimer = SHAKE_DURATION * 0.7;
+    if (_fpsGroup) {
+      _fpsGroup.visible = true;
+    }
   }
+}
+
+// Geriye uyumluluk için alias
+export const triggerUmbrellaShake = toggleUmbrella;
+
+/**
+ * Şemsiyenin açık olup olmadığını döner.
+ */
+export function isUmbrellaOpen() {
+  return _umbrellaTargetState > 0.5;
 }
 
 /**

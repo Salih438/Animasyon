@@ -124,14 +124,14 @@ let _lastEmittedLightningFactor = -1.0;
 let _stochasticTimer  = 4.5 + Math.random() * 2.0; // İlk doğal şimşek ~5 saniyede çakar
 
 // Zero-Allocation Renk Nesneleri (Her frame new Color() çağırmak KESİNLİKLE YASAKTIR)
-const _colBgBase    = new THREE.Color(0x030306); // Derin noir gece arkaplanı
+const _colBgBase    = new THREE.Color(0x0d1526); // Sinematik gece mavisi zemin
 const _colBgFlash   = new THREE.Color(0x4a6a94); // Şimşek fırtına mavisi/beyazı
 const _colCurrent   = new THREE.Color();
 
-const _colSkyBase   = new THREE.Color(0x1a2238);
+const _colSkyBase   = new THREE.Color(0x243450); // Gece mavisi gökyüzü dolgusu
 const _colSkyFlash  = new THREE.Color(0x6a8ab4);
 
-const _colMoonBase  = new THREE.Color(0x1a1a2e);
+const _colMoonBase  = new THREE.Color(0x222a45);
 const _colMoonFlash = new THREE.Color(0xa0c0e8);
 
 // Reusable math nesneleri (update loop'ta 0 allocation)
@@ -423,23 +423,23 @@ export async function initLighting(scene, group, config) {
 
   // ── 1. HemisphereLight ───────────────────────────────────────────────────
   _hemiLight = new THREE.HemisphereLight(
-    0x1a2238, // Soğuk gece gökyüzü dolgusu
-    0x0c101a, // Koyu zemin yansıması
-    0.32
+    0x243450, // Sinematik gece mavisi gökyüzü dolgusu
+    0x0e1422, // Koyu zemin yansıması
+    1.35      // Taban aydınlığı: binalar ve silüetler net seçilir (1.35)
   );
   _hemiLight.name = 'hemisphereLight';
   lightsGroup.add(_hemiLight);
 
   // ── 2. AmbientLight ───────────────────────────────────────────────────────
   _ambientLight = new THREE.AmbientLight(
-    0x141a2c, // Gece mavisi dolgu (film noir derinliği & detay okunabilirliği)
-    0.38
+    0x162238, // Kobalt/gece mavisi dolgu (zifiri karanlığı çözer, detayları okutur)
+    1.35      // 1.35 seviyesi
   );
   _ambientLight.name = 'ambientLight';
   lightsGroup.add(_ambientLight);
 
   // ── 2b. Viewmodel & Street Forward Rim Light ──────────────────────────────
-  const walkerFill = new THREE.DirectionalLight(0x7090b8, 0.40);
+  const walkerFill = new THREE.DirectionalLight(0x7090b8, 0.55);
   walkerFill.name = 'streetRimLight';
   walkerFill.position.set(2.2, 3.5, -2.0);
   walkerFill.target.position.set(2.2, 1.2, 20.0);
@@ -447,7 +447,7 @@ export async function initLighting(scene, group, config) {
   lightsGroup.add(walkerFill.target);
 
   // ── 2c. Sidewalk & Curb Soft Atmospheric Fill ────────────────────────────
-  const sidewalkFill = new THREE.DirectionalLight(0x405575, 0.50);
+  const sidewalkFill = new THREE.DirectionalLight(0x405575, 0.65);
   sidewalkFill.name = 'sidewalkFillLight';
   sidewalkFill.position.set(-4.5, 6.0, -5.0);
   sidewalkFill.target.position.set(-4.5, 0.0, 30.0);
@@ -455,7 +455,7 @@ export async function initLighting(scene, group, config) {
   lightsGroup.add(sidewalkFill.target);
 
   // ── 3. DirectionalLight (Ay Işığı & Şimşek Flaş Kaynağı) ─────────────────
-  _moonLight = new THREE.DirectionalLight(0x1a1a2e, 0.25);
+  _moonLight = new THREE.DirectionalLight(0x222a45, 0.38);
   _moonLight.name = 'moonLight';
   _moonLight.position.set(50, 100, 50);
 
@@ -554,20 +554,20 @@ export function updateLighting(delta, cameraPos) {
     if (_sceneRef.fog && _sceneRef.fog.color) _sceneRef.fog.color.copy(_colCurrent);
   }
 
-  // AmbientLight: 0.38 -> 2.60
+  // AmbientLight: 1.35 -> 2.80
   if (_ambientLight) {
-    _ambientLight.intensity = 0.38 + _lightningFactor * 2.22;
+    _ambientLight.intensity = 1.35 + _lightningFactor * 1.45;
   }
 
-  // HemisphereLight: 0.32 -> 1.70
+  // HemisphereLight: 1.35 -> 2.40
   if (_hemiLight) {
-    _hemiLight.intensity = 0.32 + _lightningFactor * 1.38;
+    _hemiLight.intensity = 1.35 + _lightningFactor * 1.05;
     _hemiLight.color.copy(_colSkyBase).lerp(_colSkyFlash, _lightningFactor);
   }
 
-  // DirectionalLight (Keskin flaş gölgeleri): 0.25 -> 3.50
+  // DirectionalLight (Keskin flaş gölgeleri): 0.38 -> 3.20
   if (_moonLight) {
-    _moonLight.intensity = 0.25 + _lightningFactor * 3.25;
+    _moonLight.intensity = 0.38 + _lightningFactor * 2.82;
     _moonLight.color.copy(_colMoonBase).lerp(_colMoonFlash, _lightningFactor);
   }
 

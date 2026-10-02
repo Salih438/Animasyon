@@ -20,12 +20,9 @@
 
 import * as THREE from 'three';
 
-if (typeof window !== 'undefined') {
-  window.THREE = THREE;
-}
 
-// ─── Scene modules (Phase 2+ doldurulacak) ──────────────────────────────────
-import { initSky } from './scene/sky.js';
+// ─── Scene modules ──────────────────────────────────────────────────────────
+import { initSky, updateSky } from './scene/sky.js';
 import { initWorld,   updateWorld   } from './scene/world/index.js';
 import { initGround,  updateGround, onResizeGround  } from './scene/ground.js';
 import { initWalker,  updateWalker, getUmbrellaInertiaData, setUmbrellaVisible, triggerUmbrellaShake, setWalkerTurnInput, getWalkerData } from './scene/walker.js';
@@ -63,11 +60,11 @@ export const CONFIG = Object.freeze({
     powerPreference: 'high-performance',
   },
 
-  /** Atmosfer (Derin Film Noir Gece) */
+  /** Atmosfer (Derin Gece Mavisi / Sinematik Ufuk) */
   atmosphere: {
-    backgroundColor: 0x030306,
-    fogColor:        0x030308,
-    fogDensity:      0.00038,
+    backgroundColor: 0x0d1526,
+    fogColor:        0x142036,
+    fogDensity:      0.00030,
   },
 
   /** Dünya hareketi — p5.js CAM_SPD=6 birim/frame → saniyeye normalize */
@@ -108,7 +105,7 @@ export const groups = {
 };
 
 // ─── Re-usable temporaries (loop içinde allocation önleme) ──────────────────
-// (Phase 2+ eklenecek: const _v3 = new THREE.Vector3() vb.)
+// Her modül kendi scratch objelerini lokal olarak tanımlıyor.
 
 // ════════════════════════════════════════════════════════════════════════════
 //  INIT
@@ -146,7 +143,7 @@ function initRenderer() {
   // Clear color (arka plan sızmalarını önleyen tam opak derin gece rengi)
   renderer.setClearColor(CONFIG.atmosphere.backgroundColor, 1.0);
 
-  if (typeof window !== 'undefined') {
+  if (DEBUG) {
     window.__renderer = renderer;
   }
 
@@ -166,7 +163,7 @@ function initScene() {
   // Faz 8: SkyDome (scene/sky.js)
   initSky(scene);
 
-  if (typeof window !== 'undefined') {
+  if (DEBUG) {
     window.__scene = scene;
   }
 }
@@ -187,7 +184,7 @@ function initCamera() {
   // FPS Viewmodel şemsiyesini desteklemek için kamera sahneye eklenmelidir
   scene.add(camera);
 
-  if (typeof window !== 'undefined') {
+  if (DEBUG) {
     window.__camera = camera;
   }
 }
@@ -287,6 +284,7 @@ function onResize() {
 
 function update(delta) {
   // ── Modül Güncellemeleri ───────────────────────────────────────────────────
+  updateSky(delta);
   updateWorld(delta);
   updateGround(delta);
   updateWalker(delta, camera);
@@ -314,7 +312,7 @@ function render(delta) {
 function animate() {
   requestAnimationFrame(animate);
 
-  const delta = clock.getDelta();
+  const delta = Math.min(clock.getDelta(), 0.1);
 
   update(delta);
   render(delta);
@@ -349,9 +347,10 @@ async function main() {
   initDebugHelpers();
   initTestObjects();
 
-  if (typeof window !== 'undefined') {
-    window.__camera = camera;
-    window.__renderer = renderer;
+  if (DEBUG) {
+    window.__camera    = camera;
+    window.__renderer  = renderer;
+    window.__scene     = scene;
     window.__triggerLightning = triggerLightning;
     window.__getUmbrellaInertiaData = getUmbrellaInertiaData;
     window.__setUmbrellaVisible = setUmbrellaVisible;

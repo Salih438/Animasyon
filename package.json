@@ -4,6 +4,7 @@
   "description": "Three.js Rainy Night Animation",
   "main": "main.js",
   "scripts": {
+    "build": "echo Static build ready",
     "start": "http-server -c-1 --port 8080"
   },
   "dependencies": {

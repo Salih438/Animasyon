@@ -25,23 +25,21 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { VignetteShader } from 'three/addons/shaders/VignetteShader.js';
 
 // ─── Post-Processing Pipeline Durumu ─────────────────────────────────────────
 let _composer     = null;
 let _renderPass   = null;
 let _bloomPass    = null;
 let _rainLensPass = null;
-let _vignettePass = null;
 let _outputPass   = null;
 let _active       = false;
 
 // ─── Optik Ayar Parametreleri ────────────────────────────────────────────────
 export const POST_CONFIG = Object.freeze({
   bloom: {
-    threshold: 0.84,   // Yalnızca parlak neonlar, farlar ve ampuller parlar; gökyüzü/sis patlamaz
-    strength:  0.36,   // Zarif, sinematik lens difüzyonu (beyaz sis örtüsünü önler)
-    radius:    0.45,   // Doğal sodyum/yağmur sisi difüzyonu
+    threshold: 0.68,   // Neonlar, araba farları/stopları, sokak lambaları ve pencereler tatlı bir ışıltı yayar
+    strength:  0.52,   // Sinematik buğulu yağmur gecesi ışıltısı (görsel netliği korur)
+    radius:    0.50,   // Kontrollü difüzyon
   },
   vignette: {
     offset:    1.15,   // Geniş odak açıklığı
@@ -248,7 +246,7 @@ export async function initPostprocessing(renderer, scene, camera, config = {}) {
     _rainLensPass.uniforms['uVignetteDarkness'].value = POST_CONFIG.vignette.darkness;
     _composer.addPass(_rainLensPass);
 
-    // 6. OutputPass — ACESFilmic Tone Mapping & sRGB Color Space
+    // 5. OutputPass — ACESFilmic Tone Mapping & sRGB Color Space
     _outputPass = new OutputPass();
     _composer.addPass(_outputPass);
 
@@ -337,5 +335,4 @@ export function setLensRainIntensity(val) {
 export function getComposer()     { return _composer;     }
 export function getBloomPass()    { return _bloomPass;    }
 export function getRainLensPass() { return _rainLensPass; }
-export function getVignettePass() { return _vignettePass; }
 export function isPostActive()    { return _active;       }

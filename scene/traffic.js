@@ -50,18 +50,18 @@ const Z_OUTGOING_DESPAWN     = 320.0; // Uzakta ufka karışma sınırı
 // ══════════════════════════════════════════════════════════════════════════════
 
 const CAR_COLORS = Object.freeze([
-  0x1a2942, // 0: Metalik Gece Mavisi (Sedan - Incoming)
-  0x4c141d, // 1: Bordo / Koyu Şarap (Hatchback - Incoming)
-  0xd49b1a, // 2: Taksi Sarısı (SUV - Incoming)
-  0x23262b, // 3: Füme / Antrasit (Sedan - Incoming)
-  0xa6b2be, // 4: Gümüş İnci Metalik (Hatchback - Incoming)
-  0x163322, // 5: İngiliz Yarış Yeşili (SUV - Incoming)
-  0x111215, // 6: Gece Siyahı (Sedan - Outgoing)
-  0x1b2845, // 7: Koyu Lacivert (Hatchback - Outgoing)
-  0x8a2318, // 8: Ateş Kırmızısı (SUV - Outgoing)
-  0x444952, // 9: Titanyum Grisi (Sedan - Outgoing)
-  0xcca020, // 10: Şehir Taksi Sarısı (Hatchback - Outgoing)
-  0x183059, // 11: Safir Mavisi (SUV - Outgoing)
+  0x243859, // 0: Metalik Gece Mavisi (Sedan - Incoming)
+  0x5a1a24, // 1: Bordo / Koyu Şarap (Hatchback - Incoming)
+  0xe0aa26, // 2: Taksi Sarısı (SUV - Incoming)
+  0x353a42, // 3: Füme / Antrasit (Sedan - Incoming)
+  0xb4c0cc, // 4: Gümüş İnci Metalik (Hatchback - Incoming)
+  0x224832, // 5: İngiliz Yarış Yeşili (SUV - Incoming)
+  0x202634, // 6: Derin Gece Grafit (Sedan - Outgoing)
+  0x25385c, // 7: Koyu Lacivert (Hatchback - Outgoing)
+  0x9c2d20, // 8: Ateş Kırmızısı (SUV - Outgoing)
+  0x525864, // 9: Titanyum Grisi (Sedan - Outgoing)
+  0xdcb028, // 10: Şehir Taksi Sarısı (Hatchback - Outgoing)
+  0x224276, // 11: Safir Mavisi (SUV - Outgoing)
 ]);
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -261,9 +261,11 @@ export async function initTraffic(scene, group, config) {
 
   // ── Paylaşılan Materyaller ───────────────────────────────────────────────
   _matGlass = new THREE.MeshStandardMaterial({
-    color:     0x07090e,
-    metalness: 0.90,
-    roughness: 0.12,
+    color:             0x141c2c,
+    metalness:         0.88,
+    roughness:         0.14,
+    emissive:          new THREE.Color(0x0c121e),
+    emissiveIntensity: 0.30,
   });
 
   _matWheel = new THREE.MeshStandardMaterial({
@@ -326,11 +328,14 @@ export async function initTraffic(scene, group, config) {
       headingYaw = Math.PI;
     }
 
-    // Gövde boya materyali (Her araç için zengin gece metalik tonu)
+    // Gövde boya materyali (Zengin gece metalik tonu + yumuşak ortam emissive yanıtı)
+    const carCol = new THREE.Color(CAR_COLORS[i]);
     const matPaint = new THREE.MeshStandardMaterial({
-      color:     CAR_COLORS[i],
-      metalness: 0.82,
-      roughness: 0.28,
+      color:             CAR_COLORS[i],
+      metalness:         0.78,
+      roughness:         0.28,
+      emissive:          carCol.clone().multiplyScalar(0.22),
+      emissiveIntensity: 0.55,
     });
 
     // Araç Hiyerarşisi
@@ -368,6 +373,7 @@ export async function initTraffic(scene, group, config) {
       isIncoming:  isIncoming,
       group:       carRoot,
       x:           posX,
+      laneX:       posX, // C1 fix: splash/spray koordinatları için gerekli
       z:           startZ,
       vRel:        vRel,
       profile:     profileKey,
@@ -451,57 +457,92 @@ export function spawnWheelSpray(x, y, z, vx, vy, vz, scale = 0.50, life = 0.35) 
   _sprayVz[id]      = vz;
 }
 
-function _createHeadlightBeamTexture() {
-  if (typeof document === 'undefined') return null;
+/**
+ * Yumuşak Volumetrik Far Huzmesi Gölgelendiricisi (VolumetricHeadlightShader)
+ *
+ * - 32 segmentli dairesel koni geometrisi (keskin poligon hatlarını yok eder)
+ * - Eksenel pürüzsüz sönüm (far camından 15 metre ileriye doğru smoothstep falloff)
+ * - Tepe yumuşatma (sert geometrik iğne ucunu önler)
+ * - Bakış açısına duyarlı kenar tüyü (Fresnel / Rim feathering: abs(dot(norm, viewDir)))
+ * - Additive Blending ve 0.15 opaklık ile sinematik gece yağmuru ışık huzmesi
+ */
+const VolumetricHeadlightShader = {
+  name: 'VolumetricHeadlightShader',
+  uniforms: {
+    uLength:    { value: 15.0 },
+    uColor:     { value: new THREE.Color(0xfff6e4) },
+    uIntensity: { value: 0.15 },
+  },
+  vertexShader: `
+    varying vec3 vViewPosition;
+    varying vec3 vNormal;
+    varying float vProgress;
+    uniform float uLength;
 
-  const w = 128, h = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width  = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
+    void main() {
+      // position.z: apex'te 0.0, tabanda -uLength (-15.0)
+      vProgress = clamp(-position.z / uLength, 0.0, 1.0);
 
-  ctx.clearRect(0, 0, w, h);
+      #ifdef USE_INSTANCING
+        mat4 m = modelViewMatrix * instanceMatrix;
+        vec4 mvPosition = m * vec4(position, 1.0);
+        mat3 normMat = mat3(m);
+        vNormal = normalize(normMat * normal);
+      #else
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        vNormal = normalize(normalMatrix * normal);
+      #endif
 
-  // Tepe noktasından (far camı) ileriye doğru yumuşak doğrusal/üstel sönüm
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0.00, 'rgba(255, 250, 235, 0.90)');
-  grad.addColorStop(0.10, 'rgba(250, 240, 220, 0.60)');
-  grad.addColorStop(0.35, 'rgba(235, 225, 205, 0.22)');
-  grad.addColorStop(0.70, 'rgba(215, 210, 195, 0.06)');
-  grad.addColorStop(1.00, 'rgba(200, 195, 180, 0.00)');
+      vViewPosition = -mvPosition.xyz;
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    varying vec3 vViewPosition;
+    varying vec3 vNormal;
+    varying float vProgress;
 
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, w, h);
+    uniform vec3 uColor;
+    uniform float uIntensity;
 
-  // Yan kenar yumuşatması (sol ve sağ kenarlara doğru dikişsiz geçiş)
-  const edgeGrad = ctx.createLinearGradient(0, 0, w, 0);
-  edgeGrad.addColorStop(0.0,  'rgba(0, 0, 0, 1.0)');
-  edgeGrad.addColorStop(0.28, 'rgba(0, 0, 0, 0.0)');
-  edgeGrad.addColorStop(0.72, 'rgba(0, 0, 0, 0.0)');
-  edgeGrad.addColorStop(1.0,  'rgba(0, 0, 0, 1.0)');
+    void main() {
+      // 1. Eksenel sönüm: Far camından uca doğru yumuşak gradyan
+      float forwardFade = smoothstep(1.0, 0.04, vProgress);
+      float apexSoft = smoothstep(0.0, 0.035, vProgress);
+      float axialFalloff = forwardFade * apexSoft;
 
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.fillStyle = edgeGrad;
-  ctx.fillRect(0, 0, w, h);
+      // 2. Bakış açısına duyarlı kenar yumuşatma (Rim / Edge feathering)
+      // Koni kenarlarının silüet çizgilerini yumuşatarak katı üçgen hatlarını yok eder
+      vec3 viewDir = normalize(vViewPosition);
+      vec3 norm = normalize(vNormal);
+      float rim = abs(dot(norm, viewDir));
+      float edgeFeather = smoothstep(0.0, 0.50, rim);
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  return texture;
-}
+      float alpha = axialFalloff * edgeFeather * uIntensity;
+      if (alpha < 0.001) discard;
+
+      gl_FragColor = vec4(uColor * alpha, alpha);
+    }
+  `
+};
 
 function _buildHeadlightBeams(parentGroup) {
   // 15 metre ileri uzanan yatay koni (apex farda, taban -Z yönünde)
+  // 32 radyal segment ile tamamen pürüzsüz ve dairesel kesit
   const beamLen = 15.0;
-  const beamGeo = new THREE.ConeGeometry(1.4, beamLen, 14, 1, true);
+  const beamGeo = new THREE.ConeGeometry(1.5, beamLen, 32, 1, true);
   beamGeo.translate(0, -beamLen / 2, 0);
   beamGeo.rotateX(Math.PI / 2); // Apex (0,0,0)'da kalır, koni -Z yönünde uzar
 
-  const matBeam = new THREE.MeshBasicMaterial({
-    map:         _createHeadlightBeamTexture(),
-    color:       0xfff8ee,
+  const matBeam = new THREE.ShaderMaterial({
+    vertexShader:   VolumetricHeadlightShader.vertexShader,
+    fragmentShader: VolumetricHeadlightShader.fragmentShader,
+    uniforms: {
+      uLength:    { value: beamLen },
+      uColor:     { value: new THREE.Color(0xfff6e4) },
+      uIntensity: { value: 0.15 },
+    },
     transparent: true,
-    opacity:     0.28,
     blending:    THREE.AdditiveBlending,
     depthWrite:  false,
     side:        THREE.DoubleSide,

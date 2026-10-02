@@ -152,7 +152,7 @@ function _createWindowAtlas(maxAniso = 16) {
   ectx.fillStyle = '#000000';
   ectx.fillRect(0, 0, SIZE, SIZE);
 
-  // ── ROW 0: ZEMİN KAT VİTRİNLERİ (STOREFRONTS) ──────────────────────────
+  // ── ROW 0: ZEMİN KAT VİTRİNLERİ (STOREFRONTS — 4 FARKLI TİP & RENK) ────
   for (let c = 0; c < 4; c++) {
     const x0 = c * CELL;
     const y0 = 0;
@@ -171,93 +171,328 @@ function _createWindowAtlas(maxAniso = 16) {
     const kickY = y0 + 426;
     const kickH = 78;
 
-    dctx.fillStyle = '#10141e';
+    // Vitrin alt lambri paneli (Kickplate)
+    let kickCol1 = '#10141e', kickCol2 = '#1c2230';
+    if (c === 0)      { kickCol1 = '#1a1410'; kickCol2 = '#281e18'; } // Sıcak koyu ahşap
+    else if (c === 1) { kickCol1 = '#0e1620'; kickCol2 = '#162232'; } // Modern çelik grafit
+    else if (c === 2) { kickCol1 = '#180e14'; kickCol2 = '#261420'; } // Bordo-maun bistro
+    else              { kickCol1 = '#0e1814'; kickCol2 = '#16241e'; } // Koyu avcı yeşili
+
+    dctx.fillStyle = kickCol1;
     dctx.fillRect(x0 + 12, kickY, w - 24, kickH);
-    dctx.fillStyle = '#1c2230';
+    dctx.fillStyle = kickCol2;
     dctx.fillRect(x0 + 20, kickY + 8, w - 40, kickH - 16);
 
-    let warmColorStart, warmColorEnd;
+    // 4 Farklı Sinematik Vitrin Teması:
+    // c=0: Sıcak Fırın & Kafe (Golden Warm Honey Amber)
+    // c=1: Modern Butik & Tasarım Stüdyosu (Steel Cyan / Aqua)
+    // c=2: Noir Kokteyl Bar & Lounge (Deep Ruby / Crimson Neon)
+    // c=3: Vintage Kitabevi & Botanik Eczane (Emerald / Sage Green)
+    let colorTop, colorMid, colorBot, emColorTop, emColorMid;
     if (c === 0) {
-      warmColorStart = '#ffe292'; warmColorEnd = '#b46418';
+      colorTop = '#fed488'; colorMid = '#b86618'; colorBot = '#200c02';
+      emColorTop = '#f8c26c'; emColorMid = '#9e4e10';
     } else if (c === 1) {
-      warmColorStart = '#ffcb64'; warmColorEnd = '#c25812';
+      colorTop = '#5ad4ea'; colorMid = '#166292'; colorBot = '#041624';
+      emColorTop = '#46b8d4'; emColorMid = '#124870';
     } else if (c === 2) {
-      warmColorStart = '#ffdda0'; warmColorEnd = '#9a5010';
+      colorTop = '#e26090'; colorMid = '#8e163e'; colorBot = '#22040c';
+      emColorTop = '#c84a78'; emColorMid = '#6e0e2e';
     } else {
-      warmColorStart = '#ffd688'; warmColorEnd = '#9c5a1a';
+      colorTop = '#6cd8a4'; colorMid = '#18683e'; colorBot = '#041a0e';
+      emColorTop = '#56be8c'; emColorMid = '#12502e';
     }
 
+    // Ana vitrin camı iç mekan renk gradyanı
     const grad = dctx.createLinearGradient(x0, glassY, x0, glassY + glassH);
-    grad.addColorStop(0.0, warmColorStart);
-    grad.addColorStop(0.55, warmColorEnd);
-    grad.addColorStop(1.0, '#281406');
-
+    grad.addColorStop(0.0, colorTop);
+    grad.addColorStop(0.55, colorMid);
+    grad.addColorStop(1.0, colorBot);
     dctx.fillStyle = grad;
     dctx.fillRect(x0 + 16, glassY, w - 32, glassH);
 
     const egrad = ectx.createLinearGradient(x0, glassY, x0, glassY + glassH);
-    egrad.addColorStop(0.0, warmColorStart);
-    egrad.addColorStop(0.65, warmColorEnd);
-    egrad.addColorStop(1.0, '#180802');
+    egrad.addColorStop(0.0, emColorTop);
+    egrad.addColorStop(0.65, emColorMid);
+    egrad.addColorStop(1.0, '#000000');
     ectx.fillStyle = egrad;
     ectx.fillRect(x0 + 16, glassY, w - 32, glassH);
 
+    // Üst tepe penceresi (Transom)
     const tgrad = dctx.createLinearGradient(x0, transomY, x0, transomY + transomH);
-    tgrad.addColorStop(0.0, warmColorStart);
-    tgrad.addColorStop(1.0, warmColorEnd);
+    tgrad.addColorStop(0.0, colorTop);
+    tgrad.addColorStop(1.0, colorMid);
     dctx.fillStyle = tgrad;
     dctx.fillRect(x0 + 16, transomY, w - 32, transomH);
     ectx.fillStyle = tgrad;
     ectx.fillRect(x0 + 16, transomY, w - 32, transomH);
 
+    // Transom bölme çubukları
     dctx.fillStyle = '#06080e';
     ectx.fillStyle = '#000000';
-    const transomDivs = 4;
+    const transomDivs = (c === 1) ? 6 : (c === 2 ? 3 : 4);
     for (let d = 1; d < transomDivs; d++) {
       const tx = x0 + 16 + (d * (w - 32) / transomDivs);
       dctx.fillRect(tx - 3, transomY, 6, transomH);
       ectx.fillRect(tx - 3, transomY, 6, transomH);
     }
 
-    if (c === 0 || c === 3) {
-      const doorW = (w - 32) * 0.46;
-      const doorX = x0 + (w - doorW) * 0.5;
-      dctx.fillStyle = '#080a10';
+    // ── İÇ MEKAN SİLÜETLERİ (BUĞULU CAM & FLÛ DERİNLİK EFEKTİ) ─────────────
+    dctx.filter = 'blur(4px)';
+    ectx.filter = 'blur(4px)';
+
+    if (c === 0) {
+      // 🥐 C=0: FIRIN & KAFE — Pasta/Ekmek Teşhir Tezgâhı + Sıcak Sarkıt Lambalar
+      const counterW = (w - 32) * 0.48;
+      dctx.fillStyle = 'rgba(22, 14, 8, 0.85)';
+      ectx.fillStyle = '#000000';
+      dctx.fillRect(x0 + 24, glassY + glassH - 85, counterW, 85);
+      ectx.fillRect(x0 + 24, glassY + glassH - 85, counterW, 85);
+
+      // Raflar ve cam vitrin çizgisi
+      dctx.fillStyle = '#3a2212';
+      dctx.fillRect(x0 + 24, glassY + glassH - 87, counterW, 4);
+      dctx.fillRect(x0 + 28, glassY + glassH - 52, counterW - 8, 3);
+      ectx.fillRect(x0 + 24, glassY + glassH - 87, counterW, 4);
+
+      // Raf üstü fırın ürünleri / sepet silüetleri
+      dctx.fillStyle = 'rgba(18, 10, 4, 0.82)';
+      ectx.fillStyle = '#000000';
+      dctx.fillRect(x0 + 36, glassY + glassH - 74, 28, 20);
+      dctx.fillRect(x0 + 72, glassY + glassH - 76, 32, 22);
+      dctx.fillRect(x0 + 112, glassY + glassH - 72, 26, 18);
+      dctx.fillRect(x0 + 146, glassY + glassH - 75, 30, 21);
+      ectx.fillRect(x0 + 36, glassY + glassH - 74, 28, 20);
+      ectx.fillRect(x0 + 72, glassY + glassH - 76, 32, 22);
+      ectx.fillRect(x0 + 112, glassY + glassH - 72, 26, 18);
+      ectx.fillRect(x0 + 146, glassY + glassH - 75, 30, 21);
+
+      // Tavandan sarkan sıcak küre sarkıt lambalar
+      for (let p = 0; p < 3; p++) {
+        const lx = x0 + 45 + p * 60;
+        const ly = glassY + 48;
+        dctx.fillStyle = '#0a0604';
+        dctx.fillRect(lx - 1, glassY, 2, 48);
+        dctx.fillStyle = '#fff4c2';
+        ectx.fillStyle = '#fff4c2';
+        dctx.beginPath(); dctx.arc(lx, ly, 7, 0, Math.PI * 2); dctx.fill();
+        ectx.beginPath(); ectx.arc(lx, ly, 7, 0, Math.PI * 2); ectx.fill();
+      }
+
+    } else if (c === 1) {
+      // 💎 C=1: MODERN CAMGÖBEĞİ BUTİK — Podyum Teşhirleri + Dikey Neon Şeritler
+      dctx.fillStyle = 'rgba(8, 18, 26, 0.82)';
+      ectx.fillStyle = '#000000';
+      dctx.fillRect(x0 + 40, glassY + glassH - 65, 75, 65);
+      dctx.fillRect(x0 + w - 125, glassY + glassH - 85, 85, 85);
+      ectx.fillRect(x0 + 40, glassY + glassH - 65, 75, 65);
+      ectx.fillRect(x0 + w - 125, glassY + glassH - 85, 85, 85);
+
+      // Kaideler üzerindeki heykelsi / butik ürün silüetleri
+      dctx.fillStyle = 'rgba(4, 10, 16, 0.88)';
+      ectx.fillStyle = '#000000';
+      dctx.fillRect(x0 + 60, glassY + glassH - 120, 35, 55);
+      dctx.fillRect(x0 + w - 105, glassY + glassH - 148, 45, 63);
+      ectx.fillRect(x0 + 60, glassY + glassH - 120, 35, 55);
+      ectx.fillRect(x0 + w - 105, glassY + glassH - 148, 45, 63);
+
+      // Tavandan dikey asılı neon tüpler
+      for (let n = 0; n < 4; n++) {
+        const nx = x0 + 130 + n * 45;
+        dctx.fillStyle = '#8ce8f4';
+        ectx.fillStyle = '#8ce8f4';
+        dctx.fillRect(nx, glassY + 12, 3, 95);
+        ectx.fillRect(nx, glassY + 12, 3, 95);
+      }
+
+    } else if (c === 2) {
+      // 🍸 C=2: NOIR BİSTRO & BAR — İçki Şişesi Rafları + Bar Tezgâhı & Tabureler
+      const shelfY0 = glassY + 35;
+      for (let s = 0; s < 3; s++) {
+        const sy = shelfY0 + s * 45;
+        dctx.fillStyle = '#1c0810';
+        dctx.fillRect(x0 + 25, sy + 22, (w - 32) * 0.52, 4);
+        ectx.fillRect(x0 + 25, sy + 22, (w - 32) * 0.52, 4);
+
+        for (let b = 0; b < 7; b++) {
+          const bx = x0 + 32 + b * 24;
+          const bh = 14 + (b % 3) * 5;
+          dctx.fillStyle = 'rgba(18, 4, 8, 0.88)';
+          ectx.fillStyle = '#000000';
+          dctx.fillRect(bx, sy + 22 - bh, 9, bh);
+          ectx.fillRect(bx, sy + 22 - bh, 9, bh);
+        }
+      }
+
+      // Masif bar tezgâhı (silüet)
+      dctx.fillStyle = 'rgba(24, 6, 12, 0.86)';
+      ectx.fillStyle = '#000000';
+      dctx.fillRect(x0 + 20, glassY + glassH - 72, (w - 32) * 0.55, 72);
+      ectx.fillRect(x0 + 20, glassY + glassH - 72, (w - 32) * 0.55, 72);
+
+      // Yüksek bar tabureleri
+      for (let st = 0; st < 3; st++) {
+        const stX = x0 + 40 + st * 55;
+        const stY = glassY + glassH - 58;
+        dctx.fillStyle = 'rgba(14, 3, 6, 0.88)';
+        ectx.fillStyle = '#000000';
+        dctx.fillRect(stX - 11, stY, 22, 6);
+        dctx.fillRect(stX - 2, stY + 6, 4, 52);
+        ectx.fillRect(stX - 11, stY, 22, 6);
+        ectx.fillRect(stX - 2, stY + 6, 4, 52);
+      }
+
+    } else {
+      // 📚 C=3: VİNTAGE KİTABEVİ & BOTANİK — Yüksek Kitap Rafları + Sıcak Vitrin Masası
+      const bookW = (w - 32) * 0.44;
+      for (let kr = 0; kr < 4; kr++) {
+        const ry = glassY + 30 + kr * 46;
+        dctx.fillStyle = '#101a14';
+        dctx.fillRect(x0 + 24, ry + 24, bookW, 4);
+        ectx.fillRect(x0 + 24, ry + 24, bookW, 4);
+
+        for (let bk = 0; bk < 8; bk++) {
+          const bx = x0 + 28 + bk * 18;
+          const bh = 18 + (bk % 4) * 3;
+          dctx.fillStyle = 'rgba(6, 14, 10, 0.88)';
+          ectx.fillStyle = '#000000';
+          dctx.fillRect(bx, ry + 24 - bh, 14, bh);
+          ectx.fillRect(bx, ry + 24 - bh, 14, bh);
+        }
+      }
+
+      // Ön vitrin ahşap kitap masası / teşhir
+      dctx.fillStyle = 'rgba(14, 24, 18, 0.86)';
+      ectx.fillStyle = '#000000';
+      dctx.fillRect(x0 + 20, glassY + glassH - 60, bookW + 10, 60);
+      ectx.fillRect(x0 + 20, glassY + glassH - 60, bookW + 10, 60);
+
+      // Tavandan sarkan antika lamba
+      const alx = x0 + 80;
+      const aly = glassY + 55;
+      dctx.fillStyle = '#060c08';
+      dctx.fillRect(alx - 1, glassY, 2, 55);
+      dctx.fillStyle = '#a4f8d4';
+      ectx.fillStyle = '#a4f8d4';
+      dctx.beginPath(); dctx.arc(alx, aly, 8, 0, Math.PI * 2); dctx.fill();
+      ectx.beginPath(); ectx.arc(alx, aly, 8, 0, Math.PI * 2); ectx.fill();
+    }
+
+    // Flû efekti sıfırla (Cam üstü doğrama ve yansımalar keskin çizilir)
+    dctx.filter = 'none';
+    ectx.filter = 'none';
+
+    // ── CAM ÜSTÜ DETAYLAR: TENTE GÖLGESİ, CAM PARLAMALARI VE PENCERE DOĞRAMALARI ──
+    // 1. Üst tente / saçak derinlik gölgesi
+    const topShadow = dctx.createLinearGradient(x0, glassY, x0, glassY + 80);
+    topShadow.addColorStop(0.0, 'rgba(4, 6, 12, 0.78)');
+    topShadow.addColorStop(0.45, 'rgba(4, 6, 12, 0.35)');
+    topShadow.addColorStop(1.0, 'rgba(4, 6, 12, 0.00)');
+    dctx.fillStyle = topShadow;
+    dctx.fillRect(x0 + 16, glassY, w - 32, 80);
+
+    // 2. Vitrin camı yüzey yansıması (diyagonal ıslak gece sokak parlaması)
+    const reflGrad = dctx.createLinearGradient(x0 + 16, glassY, x0 + w - 16, glassY + glassH);
+    reflGrad.addColorStop(0.00, 'rgba(255, 255, 255, 0.00)');
+    reflGrad.addColorStop(0.28, 'rgba(215, 235, 255, 0.00)');
+    reflGrad.addColorStop(0.36, 'rgba(215, 235, 255, 0.14)');
+    reflGrad.addColorStop(0.42, 'rgba(215, 235, 255, 0.02)');
+    reflGrad.addColorStop(0.58, 'rgba(225, 240, 255, 0.00)');
+    reflGrad.addColorStop(0.66, 'rgba(225, 240, 255, 0.11)');
+    reflGrad.addColorStop(0.72, 'rgba(225, 240, 255, 0.00)');
+    reflGrad.addColorStop(1.00, 'rgba(255, 255, 255, 0.00)');
+    dctx.fillStyle = reflGrad;
+    dctx.fillRect(x0 + 16, glassY, w - 32, glassH);
+
+    // 3. Giriş kapıları (sağ taraf)
+    if (c === 0) {
+      const doorW = (w - 32) * 0.40;
+      const doorX = x0 + w - 24 - doorW;
+      dctx.fillStyle = '#140c06';
       ectx.fillStyle = '#000000';
       dctx.fillRect(doorX, glassY, doorW, glassH);
       ectx.fillRect(doorX, glassY, doorW, glassH);
 
-      const dInGrad = dctx.createLinearGradient(doorX, glassY + 20, doorX, glassY + glassH - 40);
-      dInGrad.addColorStop(0.0, 'rgba(255, 230, 160, 0.88)');
-      dInGrad.addColorStop(1.0, 'rgba(120, 60, 20, 0.82)');
-      dctx.fillStyle = dInGrad;
-      dctx.fillRect(doorX + 12, glassY + 24, doorW - 24, glassH - 48);
-      ectx.fillStyle = dInGrad;
-      ectx.fillRect(doorX + 12, glassY + 24, doorW - 24, glassH - 48);
+      const dGrad = dctx.createLinearGradient(doorX, glassY + 16, doorX, glassY + glassH - 32);
+      dGrad.addColorStop(0.0, 'rgba(255, 228, 160, 0.88)');
+      dGrad.addColorStop(1.0, 'rgba(130, 65, 16, 0.82)');
+      dctx.fillStyle = dGrad;
+      dctx.fillRect(doorX + 10, glassY + 20, doorW - 20, glassH - 40);
+      ectx.fillStyle = dGrad;
+      ectx.fillRect(doorX + 10, glassY + 20, doorW - 20, glassH - 40);
 
-      dctx.fillStyle = '#08090e';
-      ectx.fillStyle = '#000000';
-      dctx.fillRect(doorX + doorW * 0.5 - 2, glassY + 20, 4, glassH - 40);
-      ectx.fillRect(doorX + doorW * 0.5 - 2, glassY + 20, 4, glassH - 40);
-
-      dctx.fillStyle = '#e6be44';
-      dctx.fillRect(doorX + doorW * 0.5 - 8, glassY + glassH * 0.52, 4, 32);
-      dctx.fillRect(doorX + doorW * 0.5 + 4, glassY + glassH * 0.52, 4, 32);
-    } else {
+      dctx.fillStyle = '#f0cc50';
+      dctx.fillRect(doorX + 16, glassY + glassH * 0.48, 4, 34);
+    } else if (c === 1) {
       const midX = x0 + w * 0.5;
-      dctx.fillStyle = '#080a10';
+      dctx.fillStyle = '#061018';
       ectx.fillStyle = '#000000';
       dctx.fillRect(midX - 3, glassY, 6, glassH);
       ectx.fillRect(midX - 3, glassY, 6, glassH);
 
-      dctx.fillStyle = '#100a06';
+      dctx.fillStyle = '#d0f0ff';
+      dctx.fillRect(midX - 9, glassY + glassH * 0.44, 3, 50);
+    } else if (c === 2) {
+      const doorW = (w - 32) * 0.38;
+      const doorX = x0 + w - 20 - doorW;
+      dctx.fillStyle = '#14040a';
       ectx.fillStyle = '#000000';
-      dctx.fillRect(x0 + 30, glassY + glassH - 72, (w - 32) * 0.40, 72);
-      dctx.fillRect(x0 + w * 0.5 + 20, glassY + glassH - 88, (w - 32) * 0.38, 88);
-      ectx.fillRect(x0 + 30, glassY + glassH - 72, (w - 32) * 0.40, 72);
-      ectx.fillRect(x0 + w * 0.5 + 20, glassY + glassH - 88, (w - 32) * 0.38, 88);
+      dctx.fillRect(doorX, glassY, doorW, glassH);
+      ectx.fillRect(doorX, glassY, doorW, glassH);
+
+      const dGrad2 = dctx.createLinearGradient(doorX, glassY + 20, doorX, glassY + glassH - 30);
+      dGrad2.addColorStop(0.0, 'rgba(235, 120, 160, 0.85)');
+      dGrad2.addColorStop(1.0, 'rgba(100, 16, 42, 0.80)');
+      dctx.fillStyle = dGrad2;
+      dctx.fillRect(doorX + 8, glassY + 24, doorW - 16, glassH - 48);
+      ectx.fillStyle = dGrad2;
+      ectx.fillRect(doorX + 8, glassY + 24, doorW - 16, glassH - 48);
+
+      dctx.fillStyle = '#0a0205';
+      ectx.fillStyle = '#000000';
+      dctx.fillRect(doorX + doorW * 0.5 - 2, glassY, 4, glassH);
+      ectx.fillRect(doorX + doorW * 0.5 - 2, glassY, 4, glassH);
+    } else {
+      const doorW = (w - 32) * 0.42;
+      const doorX = x0 + w - 22 - doorW;
+      dctx.fillStyle = '#0c1610';
+      ectx.fillStyle = '#000000';
+      dctx.fillRect(doorX, glassY, doorW, glassH);
+      ectx.fillRect(doorX, glassY, doorW, glassH);
+
+      const dGrad3 = dctx.createLinearGradient(doorX, glassY + 20, doorX, glassY + glassH - 30);
+      dGrad3.addColorStop(0.0, 'rgba(160, 240, 200, 0.88)');
+      dGrad3.addColorStop(1.0, 'rgba(24, 95, 60, 0.82)');
+      dctx.fillStyle = dGrad3;
+      dctx.fillRect(doorX + 10, glassY + 24, doorW - 20, glassH - 48);
+      ectx.fillStyle = dGrad3;
+      ectx.fillRect(doorX + 10, glassY + 24, doorW - 20, glassH - 48);
+
+      dctx.fillStyle = '#d4aa50';
+      dctx.fillRect(doorX + 16, glassY + glassH * 0.50, 5, 26);
     }
 
+    // 4. İnce Vitrin Doğramaları (Muntins / Mullions) — Fiziksel Cam Bölme Çizgileri
+    const midY = glassY + glassH * 0.44;
+    dctx.fillStyle = '#080a10';
+    dctx.fillRect(x0 + 16, midY - 3, w - 32, 6);
+    dctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+    dctx.fillRect(x0 + 16, midY - 3, w - 32, 1);
+    dctx.fillStyle = 'rgba(0, 0, 0, 0.70)';
+    dctx.fillRect(x0 + 16, midY + 3, w - 32, 1);
+
+    const vMullion1 = x0 + 16 + (w - 32) * 0.35;
+    const vMullion2 = x0 + 16 + (w - 32) * 0.65;
+    for (const vx of [vMullion1, vMullion2]) {
+      dctx.fillStyle = '#080a10';
+      dctx.fillRect(vx - 2, glassY, 4, glassH);
+      dctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
+      dctx.fillRect(vx - 2, glassY, 1, glassH);
+      dctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+      dctx.fillRect(vx + 2, glassY, 1, glassH);
+    }
+
+    // Vitrin dış ahşap / metal çerçeve kenarları
     dctx.fillStyle = '#06080c';
     dctx.fillRect(x0, y0, w, 8);
     dctx.fillRect(x0, y0 + h - 8, w, 8);
@@ -375,21 +610,33 @@ function _createWindowAtlas(maxAniso = 16) {
         }
       } else {
         const darkGrad = dctx.createLinearGradient(gx, gy, gx, gy + gh);
+        let roomEmissive = '#000000';
         if (c === 0) {
-          darkGrad.addColorStop(0.0, '#0f1422');
-          darkGrad.addColorStop(1.0, '#06080e');
+          // Loş gece mavisi iç mekan ışığı (TV / gece lambası)
+          darkGrad.addColorStop(0.0, '#1c283e');
+          darkGrad.addColorStop(1.0, '#0a101c');
+          roomEmissive = '#141e2e';
         } else if (c === 1) {
-          darkGrad.addColorStop(0.0, '#0c1018');
-          darkGrad.addColorStop(1.0, '#04060a');
+          // Tamamen kapalı panjurlu oda
+          darkGrad.addColorStop(0.0, '#10141e');
+          darkGrad.addColorStop(1.0, '#06080e');
+          roomEmissive = '#000000';
+        } else if (c === 2) {
+          // Loş amber / gece abajuru
+          darkGrad.addColorStop(0.0, '#2e2014');
+          darkGrad.addColorStop(1.0, '#0e0804');
+          roomEmissive = '#22140a';
         } else {
-          darkGrad.addColorStop(0.0, '#0a0d14');
+          // Derin gece / uyuyan oda
+          darkGrad.addColorStop(0.0, '#0e121a');
           darkGrad.addColorStop(1.0, '#05070c');
+          roomEmissive = '#06090e';
         }
 
         dctx.fillStyle = darkGrad;
         dctx.fillRect(gx, gy, gw, gh);
 
-        ectx.fillStyle = '#000000';
+        ectx.fillStyle = roomEmissive;
         ectx.fillRect(gx, gy, gw, gh);
 
         dctx.fillStyle = '#06080c';
@@ -579,17 +826,21 @@ export function buildBuildings(parentGroup, renderer) {
   const { diffuseTex: winDiffuseTex, emissiveTex: winEmissiveTex } = _createWindowAtlas(maxAniso);
 
   const matLeft = new THREE.MeshStandardMaterial({
-    color:             0x181c26,
+    color:             0x222838,
     map:               wallTexLeft,
-    roughness:         0.75,
-    metalness:         0.15,
+    roughness:         0.68,
+    metalness:         0.20,
+    emissive:          new THREE.Color(0x0d1320),
+    emissiveIntensity: 0.25,
   });
 
   const matRight = new THREE.MeshStandardMaterial({
-    color:             0x181c26,
+    color:             0x222838,
     map:               wallTexRight,
-    roughness:         0.75,
-    metalness:         0.15,
+    roughness:         0.68,
+    metalness:         0.20,
+    emissive:          new THREE.Color(0x0d1320),
+    emissiveIntensity: 0.25,
   });
 
   const matGlass = new THREE.MeshStandardMaterial({
@@ -597,9 +848,9 @@ export function buildBuildings(parentGroup, renderer) {
     map:               winDiffuseTex,
     emissiveMap:       winEmissiveTex,
     emissive:          new THREE.Color(1.0, 1.0, 1.0),
-    emissiveIntensity: 0.65,
-    roughness:         0.12,
-    metalness:         0.80,
+    emissiveIntensity: 0.72,
+    roughness:         0.10,
+    metalness:         0.85,
   });
 
   let geoA, geoB, geoC;
@@ -627,7 +878,6 @@ export function buildBuildings(parentGroup, renderer) {
   parentGroup.add(_meshLeft, _meshRight, _meshC);
   
   _buildingData.length = 0;
-  globalThis._buildingData = _buildingData;
 
   let idxA = 0, idxB = 0, idxC = 0;
   let totalLengthLeft = 0;
@@ -750,7 +1000,7 @@ export function updateBuildings(driftZ) {
 }
 
 export function setBuildingLightningFactor(factor) {
-  const intensity = 0.28 + factor * 1.32; // 0.28 -> 1.60
+  const intensity = 0.72 + factor * 1.10; // 0.72 -> 1.82 (doğal şimşek parlaması)
   const setIntensity = (mesh) => {
     if (mesh && mesh.material) {
       if (Array.isArray(mesh.material)) {

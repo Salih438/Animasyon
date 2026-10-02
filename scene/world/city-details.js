@@ -54,9 +54,11 @@ function _createCorniceGeometry() {
 function _buildCornices(parentGroup, buildingData) {
   const corniceGeo = _createCorniceGeometry();
   const corniceMat = new THREE.MeshStandardMaterial({
-    color:     0x202430,
-    roughness: 0.45,
-    metalness: 0.30,
+    color:             0x303848,
+    roughness:         0.48,
+    metalness:         0.25,
+    emissive:          new THREE.Color(0x0e1422),
+    emissiveIntensity: 0.25,
   });
 
   _cornicesMesh = new THREE.InstancedMesh(corniceGeo, corniceMat, buildingData.length);
@@ -104,9 +106,11 @@ function _createDownspoutGeometry() {
 function _buildDownspouts(parentGroup, buildingData) {
   const downspoutGeo = _createDownspoutGeometry();
   const downspoutMat = new THREE.MeshStandardMaterial({
-    color:     0x151820,
-    roughness: 0.30,
-    metalness: 0.80,
+    color:             0x283244,
+    roughness:         0.35,
+    metalness:         0.75,
+    emissive:          new THREE.Color(0x0c121e),
+    emissiveIntensity: 0.25,
   });
 
   _downspoutsMesh = new THREE.InstancedMesh(downspoutGeo, downspoutMat, buildingData.length);
@@ -162,9 +166,11 @@ function _createPortalGeometry() {
 function _buildStorefrontPortals(parentGroup, buildingData) {
   const portalGeo = _createPortalGeometry();
   const portalMat = new THREE.MeshStandardMaterial({
-    color:     0x181c24,
-    roughness: 0.58,
-    metalness: 0.30,
+    color:             0x2e3648,
+    roughness:         0.52,
+    metalness:         0.30,
+    emissive:          new THREE.Color(0x101622),
+    emissiveIntensity: 0.28,
   });
 
   _storefrontPortalsMesh = new THREE.InstancedMesh(portalGeo, portalMat, buildingData.length);
@@ -245,9 +251,11 @@ function _buildStreetFurniture(parentGroup, buildingData) {
   
   const furnGeo = BufferGeometryUtils.mergeGeometries([trashGeo, hydrantGeo1, hydrantGeo2, benchGeo], false);
   const matFurn = new THREE.MeshStandardMaterial({
-    color:     0x22262a,
-    roughness: 0.7,
-    metalness: 0.3
+    color:             0x44423c, // Sıcak ahşap / döküm metalik sokak mobilyası tonu
+    roughness:         0.48,
+    metalness:         0.45,
+    emissive:          new THREE.Color(0x181512),
+    emissiveIntensity: 0.35,
   });
   
   const maxFurn = Math.floor(buildingData.length * 0.5);
